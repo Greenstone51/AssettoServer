@@ -138,15 +138,6 @@ public class SteamService : BackgroundService
 
             client.Disconnecting += Client_OnDisconnecting;
 
-            foreach (int appid in _configuration.Extra.ValidateDlcOwnership)
-            {
-                if (SteamServer.UserHasLicenseForApp(playerSteamId, appid) != UserHasLicenseForAppResult.HasLicense)
-                {
-                    taskCompletionSource.SetResult(new SteamResult { ErrorReason = $"Required DLC {appid} missing" });
-                    return;
-                }
-            }
-            
             taskCompletionSource.SetResult(new SteamResult
             {
                 Success = true,
