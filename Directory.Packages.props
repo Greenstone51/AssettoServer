@@ -36,7 +36,6 @@
     <PackageVersion Include="Serilog.Sinks.File" Version="7.0.0" />
     <PackageVersion Include="Serilog.Sinks.Grafana.Loki" Version="9.0.2" />
     <PackageVersion Include="SerilogTimings" Version="3.1.0" />
-    <PackageVersion Include="compujuckel.Facepunch.Steamworks" Version="2.5.2.2" />
     <PackageVersion Include="compujuckel.Supercluster.KDTree" Version="1.0.9" />
     <PackageVersion Include="Sigil" Version="5.0.0" />
     <PackageVersion Include="SunCalcNet" Version="2.0.0" />

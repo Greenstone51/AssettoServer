@@ -69,7 +69,6 @@
         <PackageReference Include="Serilog.Sinks.File"/>
         <PackageReference Include="Serilog.Sinks.Grafana.Loki"/>
         <PackageReference Include="SerilogTimings"/>
-        <PackageReference Include="compujuckel.Facepunch.Steamworks"/>
         <PackageReference Include="compujuckel.Supercluster.KDTree"/>
         <PackageReference Include="Sigil"/>
         <PackageReference Include="SunCalcNet"/>
@@ -110,11 +109,6 @@
 
         <None Update="wwwroot\**\*">
             <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-        </None>
-
-        <None Update="Assets\steam_appid.txt">
-            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-            <TargetPath>steam_appid.txt</TargetPath>
         </None>
     </ItemGroup>
 </Project>
