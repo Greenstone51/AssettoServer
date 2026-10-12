@@ -44,7 +44,6 @@ public class ACTcpClient : IClient
     public bool IsAdministrator { get; internal set; }
     public ulong Guid { get; internal set; }
     public string HashedGuid { get; private set; } = "";
-    public ulong? OwnerGuid { get; internal set; }
     public EntryCar EntryCar { get; internal set; } = null!;
     public bool IsDisconnectRequested => _disconnectRequested == 1;
     [MemberNotNullWhen(true, nameof(Name), nameof(Team), nameof(NationCode))]

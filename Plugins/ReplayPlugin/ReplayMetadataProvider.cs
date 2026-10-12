@@ -67,7 +67,6 @@ public class ReplayMetadataProvider
                 {
                     Name = client.Name ?? "",
                     Guid = client.Guid.ToString(),
-                    OwnerGuid = client.OwnerGuid?.ToString(),
                     NationCode = client.NationCode
                 });
             }
