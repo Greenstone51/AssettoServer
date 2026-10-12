@@ -32,8 +32,6 @@ public class CSPServerExtraOptions
             ExtraOptions += $"\r\n[EXTRA_DATA]\r\nCUSTOM_UPDATE_FORMAT = '{CSPPositionUpdate.CustomUpdateFormat}'";
         }
 
-        ExtraOptions += "\r\n[EXTRA_TWEAKS]\r\nVERIFY_STEAM_API_INTEGRITY = 1";
-        
         if (!ExtraOptions.Contains("MIN_TIME_BETWEEN_COLLISIONS"))
         {
             ExtraOptions += "\r\n[EXTRA_TWEAKS]\r\nMIN_TIME_BETWEEN_COLLISIONS = 2\r\n";
