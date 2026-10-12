@@ -21,7 +21,6 @@ using AssettoServer.Server.Configuration.Serialization;
 using AssettoServer.Server.GeoParams;
 using AssettoServer.Server.OpenSlotFilters;
 using AssettoServer.Server.Plugin;
-using AssettoServer.Server.Steam;
 using AssettoServer.Server.TrackParams;
 using AssettoServer.Server.UserGroup;
 using AssettoServer.Server.Weather;
@@ -66,7 +65,6 @@ public class Startup
         builder.RegisterType<SignalHandler>().AsSelf().As<IHostedService>().SingleInstance();
         builder.RegisterType<HttpInfoCache>().AsSelf().As<IHostedService>().SingleInstance();
         RegisterLegacyPluginInterface();
-        RegisterSteam();
         RegisterRcon();
         
         foreach (var plugin in _loader.LoadedPlugins)
@@ -127,15 +125,6 @@ public class Startup
             if (_configuration.Extra.EnableLegacyPluginInterface)
             {
                 builder.RegisterType<UdpPluginServer>().AsSelf().As<IHostedService>().SingleInstance();
-            }
-        }
-
-        void RegisterSteam()
-        {
-            if (_configuration.Extra.UseSteamAuth)
-            {
-                builder.RegisterType<SteamService>().AsSelf().As<IHostedService>().SingleInstance();
-                builder.RegisterType<SteamSlotFilter>().As<IOpenSlotFilter>();
             }
         }
 

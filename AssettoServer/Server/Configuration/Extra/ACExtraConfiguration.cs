@@ -14,8 +14,6 @@ public class ACExtraConfiguration
 {
     [YamlMember(Description = "Override minimum CSP version required to join this server. Leave this empty to not require CSP.")]
     public uint? MinimumCSPVersion { get; init; } = CSPVersion.V0_2_0;
-    [YamlMember(Description = "Enable Steam ticket validation. Requires CSP 0.1.75+ and a recent version of Content Manager")]
-    public bool UseSteamAuth { get; init; } = true;
     [YamlMember(Description = "Enable generation of Guid from name instead of SteamID. Required for ACPro", DefaultValuesHandling = DefaultValuesHandling.OmitDefaults)]
     public bool EnableACProSupport { get; init; } = false;
     [YamlMember(Description = "Enable protection against cheats/hacks. 0 = No protection. 1 = Block all public cheats as of 2023-11-18 (ClientSecurityPlugin and CSP 0.2.0+ required)", DefaultValuesHandling = DefaultValuesHandling.OmitDefaults)]

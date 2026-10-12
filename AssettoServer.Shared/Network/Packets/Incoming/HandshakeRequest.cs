@@ -12,7 +12,6 @@ public struct HandshakeRequest : IIncomingNetworkPacket, IOutgoingNetworkPacket
     public string RequestedCar;
     public string Password;
     public string? Features;
-    public byte[]? SessionTicket;
 
     public void FromReader(PacketReader reader)
     {
@@ -28,16 +27,6 @@ public struct HandshakeRequest : IIncomingNetworkPacket, IOutgoingNetworkPacket
         if (reader.Buffer.Length > reader.ReadPosition + 2)
         {
             Features = reader.ReadUTF8String(true);
-
-            if (reader.Buffer.Length > reader.ReadPosition + 2)
-            {
-                short ticketLength = reader.Read<short>();
-                if (ticketLength == reader.Buffer.Length - reader.ReadPosition)
-                {
-                    SessionTicket = new byte[ticketLength];
-                    reader.ReadBytes(SessionTicket);
-                }
-            }
         }
     }
 
@@ -53,8 +42,5 @@ public struct HandshakeRequest : IIncomingNetworkPacket, IOutgoingNetworkPacket
         writer.WriteUTF8String(Password);
         if (Features == null) return;
         writer.WriteUTF8String(Features, true);
-        if (SessionTicket == null) return;
-        writer.Write((short)SessionTicket.Length);
-        writer.WriteBytes(SessionTicket);
     }
 }

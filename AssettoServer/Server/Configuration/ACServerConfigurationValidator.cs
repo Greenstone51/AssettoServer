@@ -8,10 +8,6 @@ public class ACServerConfigurationValidator : AbstractValidator<ACServerConfigur
     {
         RuleFor(cfg => cfg.Extra).ChildRules(extra =>
         {
-            extra.RuleFor(x => x.UseSteamAuth)
-                .NotEqual(true)
-                .When(x => x.EnableACProSupport)
-                .WithMessage("Can't use SteamAuth with ACPro support enabled");
             extra.RuleFor(x => x.ServerDescription).NotNull();
             extra.RuleFor(x => x.RainTrackGripReductionPercent).InclusiveBetween(0, 0.5);
             extra.RuleFor(x => x.IgnoreConfigurationErrors).NotNull();

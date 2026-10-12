@@ -112,19 +112,6 @@ public class ACUdpServer : BackgroundService
             {
                 Send(address, _lobbyCheckResponse, 0, _lobbyCheckResponse.Length);
             }
-            /*else if (packetId == 0xFF)
-            {
-                if (buffer.Length > 4
-                    && packetReader.Read<byte>() == 0xFF
-                    && packetReader.Read<byte>() == 0xFF
-                    && packetReader.Read<byte>() == 0xFF)
-                {
-                    Log.Debug("Steam packet received");
-
-                    byte[] data = buffer.AsSpan().ToArray();
-                    Server.Steam.HandleIncomingPacket(data, remoteEp);
-                }
-            }*/
             else if (_endpointCars.TryGetValue(address, out var car))
             {
                 var client = car.Client;
