@@ -11,6 +11,9 @@ Race and Qualification sessions are in an experimental state and might need more
 
 This is a fork of https://github.com/Niewiarowski/AssettoServer.
 
+## Disclaimer
+The modifications in this fork were made entirely by [Claude](https://claude.ai), an AI assistant by Anthropic, following directions from [Greenstone51](https://github.com/Greenstone51). They are provided as is, without any warranty, and are not reviewed or endorsed by the original AssettoServer authors or by Anthropic.
+
 ## Documentation
 For more information on configuration, admin commands, etc. also check out our [website](https://assettoserver.org/).
 
