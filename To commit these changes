@@ -1,2 +1,0 @@
-git add Plugins/CollisionFlashPlugin/
-git commit -m "fix: standardize ShowInPits property and fix collision detection rendering"
