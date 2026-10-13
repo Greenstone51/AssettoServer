@@ -367,3 +367,4 @@ out-win-*
 
 # Jetbrains IDEs
 .idea/
+.aider*
