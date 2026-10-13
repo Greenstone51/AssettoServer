@@ -4,6 +4,7 @@
   <Project Path="AssettoServer\AssettoServer.csproj" />
   <Project Path="Plugins\AutoModerationPlugin\AutoModerationPlugin.csproj" />
   <Project Path="Plugins\CustomCommandPlugin\CustomCommandPlugin.csproj" />
+  <Project Path="Plugins\CollisionFlashPlugin\CollisionFlashPlugin.csproj" />
   <Project Path="Plugins\DiscordAuditPlugin\DiscordAuditPlugin.csproj" />
   <Project Path="FastLaneUtils\FastLaneUtils.csproj" />
   <Project Path="Plugins\FastTravelPlugin\FastTravelPlugin.csproj" />
