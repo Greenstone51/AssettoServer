@@ -22,7 +22,11 @@ public class CollisionFlashPlugin : IHostedService
         scriptProvider.AddScript(script, "collisionflash.lua", new Dictionary<string, object>
         {
             ["durationSeconds"] = configuration.DurationSeconds.ToString(CultureInfo.InvariantCulture),
-            ["opacity"] = configuration.Opacity.ToString(CultureInfo.InvariantCulture)
+            ["opacity"] = configuration.Opacity.ToString(CultureInfo.InvariantCulture),
+            ["topLeftX"] = configuration.TopLeftX.ToString(CultureInfo.InvariantCulture),
+            ["topLeftY"] = configuration.TopLeftY.ToString(CultureInfo.InvariantCulture),
+            ["bottomRightX"] = configuration.BottomRightX.ToString(CultureInfo.InvariantCulture),
+            ["bottomRightY"] = configuration.BottomRightY.ToString(CultureInfo.InvariantCulture)
         });
     }
 

@@ -9,6 +9,11 @@
 local cfg = ac.configValues({
   durationSeconds = 0.35,
   opacity = 0.7,
+  -- the two points of the box, as fractions of the screen (0..1)
+  topLeftX = 0,
+  topLeftY = 0,
+  bottomRightX = 1,
+  bottomRightY = 1,
 })
 
 local sim = ac.getSim()
@@ -44,7 +49,11 @@ function script.drawUI(dt)
   if flashTimer <= 0 then return end
 
   local screenSize = vec2(sim.windowWidth, sim.windowHeight)
+  local p1 = vec2(screenSize.x * cfg.topLeftX, screenSize.y * cfg.topLeftY)
+  local p2 = vec2(screenSize.x * cfg.bottomRightX, screenSize.y * cfg.bottomRightY)
+
+  -- The window itself stays full screen (known to work), only the rectangle is limited to the two points
   ui.transparentWindow('collisionFlash', vec2(0, 0), screenSize, function()
-    ui.drawRectFilled(vec2(0, 0), screenSize, rgbm(1, 0, 0, cfg.opacity))
+    ui.drawRectFilled(p1, p2, rgbm(1, 0, 0, cfg.opacity))
   end)
 end
