@@ -1,0 +1,4 @@
+-- Add the necessary Lua code to handle the AlwaysOnInPits setting
+-- This is a placeholder for the actual Lua code you need to add
+-- You will need to modify the existing code to check the AlwaysOnInPits setting
+-- and adjust the behavior accordingly
