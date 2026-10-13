@@ -426,6 +426,106 @@ local function coloredButton(label, size, color)
     return clicked
 end
 
+-- ---------- live car preview ----------
+-- Renders the real car (carRoot:0) with a GeometryShot, so wheels, suspension and lights follow the live car.
+-- The camera orbits around the car relative to its heading; drag with the left mouse button to rotate.
+
+local preview = {
+    shot = nil,
+    failed = false,
+    yaw = math.rad(35),
+    pitch = math.rad(12),
+    dragging = false,
+    size = vec2(512, 256),
+}
+
+local function ensurePreviewShot()
+    if preview.shot or preview.failed then return preview.shot end
+
+    local ok, shot = pcall(function()
+        local s = ac.GeometryShot(ac.findNodes('carRoot:0'), preview.size, 1, false)
+        s:setClippingPlanes(0.1, 200)
+
+        -- ASSUMED: a "full" shaders type exists so lights/paint render properly. Falls back to Simplified (used in FastTravelPlugin).
+        local types = render and render.ShadersType
+        if types then
+            local t = types.Main or types.Default or types.Original or types.Simplified
+            if t then s:setShadersType(t) end
+        end
+        return s
+    end)
+
+    if ok and shot then
+        preview.shot = shot
+    else
+        preview.failed = true
+        ac.log('CarColor: live preview unavailable, using swatch strip')
+    end
+    return preview.shot
+end
+
+-- Returns true if the preview was drawn, false if the caller should show the fallback.
+local function drawCarPreview()
+    local shot = ensurePreviewShot()
+    if not shot then return false end
+
+    local car = ac.getCar(0)
+    if not car then return false end
+
+    local pos = car.position
+    local heading = 0
+    local ok = pcall(function()
+        local look = car.look -- ASSUMED to exist; heading stays 0 if not
+        if look then heading = math.atan2(look.x, look.z) end
+    end)
+    if not ok then heading = 0 end
+
+    local length = 4.5
+    pcall(function()
+        if car.aabbSize and car.aabbSize.z > 1 then length = car.aabbSize.z end
+    end)
+    local dist = length * 1.55
+
+    local a = heading + preview.yaw
+    local horizontal = math.cos(preview.pitch) * dist
+    local target = vec3(pos.x, pos.y + 0.5, pos.z)
+    local camPos = vec3(
+        target.x + math.sin(a) * horizontal,
+        target.y + math.sin(preview.pitch) * dist,
+        target.z + math.cos(a) * horizontal)
+    local look = (target - camPos):normalize()
+
+    local drawn = pcall(function()
+        shot:update(camPos, look, vec3(0, 1, 0), 40)
+        local width = ui.availableSpaceX()
+        ui.image(shot, vec2(width, width * preview.size.y / preview.size.x))
+    end)
+    if not drawn then
+        preview.failed = true
+        preview.shot = nil
+        return false
+    end
+
+    -- Click-and-hold + move to rotate (ASSUMED: ui.mouseDown / ui.mouseDelta exist)
+    pcall(function()
+        if ui.itemHovered() and ui.mouseClicked(ui.MouseButton.Left) then
+            preview.dragging = true
+        end
+        if preview.dragging then
+            if ui.mouseDown(ui.MouseButton.Left) then
+                local d = ui.mouseDelta()
+                preview.yaw = preview.yaw - d.x * 0.01
+                preview.pitch = math.max(-0.1, math.min(0.8, preview.pitch + d.y * 0.005))
+            else
+                preview.dragging = false
+            end
+        end
+    end)
+
+    if ui.itemHovered() then ui.setTooltip('Hold left mouse button and move to rotate') end
+    return true
+end
+
 local function drawPreviewStrip()
     local avail = ui.availableSpaceX()
     local half = (avail - 6) / 2
@@ -549,8 +649,8 @@ local function window()
     ui.text('Pick a new color')
     ui.popFont()
     ui.separator()
-
-    drawPreviewStrip()
+    
+    if not drawCarPreview() then drawPreviewStrip() end
     ui.offsetCursorY(6)
 
     drawTargetCombo()
