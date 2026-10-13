@@ -443,23 +443,24 @@ local preview = {
     brightness = 0.5,
 }
 
+-- Order matters: the first entry that exists is the default. Main keeps the car's own shaders
+-- (lights/emissives, opaque paint); Simplified/Simplest are fallbacks that may drop lights or alpha materials.
+local shadingCandidates = { 'Main', 'Default', 'Original', 'Simplified', 'Simplest' }
+
 local function collectShadings()
     local list = {}
+    local seen = {}
     local types = render and render.ShadersType
     if types then
-        for _, name in ipairs({ 'Simplified', 'Simplest', 'Main', 'Default', 'Original' }) do
-            if types[name] ~= nil then list[#list + 1] = { name = name, value = types[name] } end
+        for _, name in ipairs(shadingCandidates) do
+            local v = types[name]
+            if v ~= nil and not seen[v] then
+                seen[v] = true
+                list[#list + 1] = { name = name, value = v }
+            end
         end
     end
     return list
-end
-
-local function applyShading()
-    local entry = preview.shadings[preview.shadingIndex]
-    if preview.shot and entry then
-        pcall(function() preview.shot:setShadersType(entry.value) end)
-        ac.log('CarColor: preview shading = ' .. entry.name)
-    end
 end
 
 local function applyAmbient()
@@ -468,26 +469,53 @@ local function applyAmbient()
     pcall(function() preview.shot:setAmbientColor(rgbm(b, b, b, 1)) end)
 end
 
+local function applyShading()
+    local entry = preview.shadings[preview.shadingIndex]
+    if preview.shot and entry then
+        pcall(function() preview.shot:setShadersType(entry.value) end)
+        applyAmbient() -- re-apply ambient so glare control follows the chosen shading
+        ac.log('CarColor: preview shading = ' .. entry.name)
+    end
+end
+
 local function ensurePreviewShot()
     if preview.shot or preview.failed then return preview.shot end
 
     local ok, shot = pcall(function()
         local s = ac.GeometryShot(ac.findNodes('carRoot:0'), preview.size, 1, false)
         s:setClippingPlanes(0.1, 200)
-        -- Calmer ambient light to reduce washed-out highlights (setAmbientColor is used on GeometryShot in FastTravelPlugin)
         return s
     end)
 
     if ok and shot then
         preview.shot = shot
         preview.shadings = collectShadings()
-        preview.shadingIndex = 1
+        preview.shadingIndex = 1 -- Main if it exists, otherwise the next available entry
         applyShading()
+
+        local found = {}
+        pcall(function()
+            if render and render.ShadersType then
+                for _, name in ipairs(shadingCandidates) do
+                    if render.ShadersType[name] ~= nil then found[#found + 1] = name end
+                end
+            end
+        end)
+        local sel = preview.shadings[preview.shadingIndex]
+        ac.log('CarColor: preview shot created. ShadersType found = [' .. table.concat(found, ', ')
+            .. '], selected = ' .. (sel and sel.name or 'none'))
     else
         preview.failed = true
         ac.log('CarColor: live preview unavailable, using swatch strip')
     end
     return preview.shot
+end
+
+-- FALLBACK (no-op): no API for forcing lights on inside a GeometryShot could be confirmed for CSP 4130,
+-- so nothing is forced. Under the Main shading the shot renders the live car node, which normally
+-- carries the real car's light state. If lights are still dark, try the other shading entries.
+local function mirrorCarLights(car)
+    -- intentionally empty
 end
 
 -- Returns true if the preview was drawn, false if the caller should show the fallback.
@@ -497,6 +525,8 @@ local function drawCarPreview()
 
     local car = ac.getCar(0)
     if not car then return false end
+
+    mirrorCarLights(car)
 
     local pos = car.position
     local heading = 0
