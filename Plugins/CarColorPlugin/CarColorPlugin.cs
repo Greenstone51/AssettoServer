@@ -20,6 +20,7 @@ public class CarColorPlugin : IHostedService
     public CarColorPlugin(CarColorConfiguration config,
         EntryCarManager entryCarManager,
         CSPServerScriptProvider scriptProvider,
+        CSPClientMessageTypeManager cspClientMessageTypeManager,
         ACServerConfiguration serverConfig)
     {
         _config = config;
@@ -31,6 +32,7 @@ public class CarColorPlugin : IHostedService
             throw new ConfigurationException("EnableClientMessages must be true for CarColorPlugin");
         }
 
+        // Values are quoted like in FastTravelPlugin; '#' is stripped from colors because it may be treated as a comment in the INI.
         _scriptProvider.AddScript(
             File.ReadAllText(Path.Join(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location), "lua", "carcolor.lua")),
             "carcolor.lua",
@@ -39,21 +41,26 @@ public class CarColorPlugin : IHostedService
                 ["changeCooldownSeconds"] = _config.ChangeCooldownSeconds.ToString(CultureInfo.InvariantCulture),
                 ["maxHistory"] = _config.MaxHistory.ToString(CultureInfo.InvariantCulture),
                 ["maxFavourites"] = _config.MaxFavourites.ToString(CultureInfo.InvariantCulture),
-                ["presets"] = string.Join(",", _config.Presets),
-                ["bodyMaterialNames"] = string.Join(",", _config.BodyMaterialNames),
-                ["caliperMaterialNames"] = string.Join(",", _config.CaliperMaterialNames)
+                ["presets"] = Quote(string.Join(",", _config.Presets.Select(p => p.TrimStart('#')))),
+                ["bodyMaterialNames"] = Quote(string.Join(",", _config.BodyMaterialNames)),
+                ["caliperMaterialNames"] = Quote(string.Join(",", _config.CaliperMaterialNames))
             });
+
+        cspClientMessageTypeManager.RegisterOnlineEvent<CarColorChangePacket>(OnColorChangeReceived);
 
         _entryCarManager.ClientConnected += OnClientConnected;
         _entryCarManager.ClientDisconnected += OnClientDisconnected;
     }
 
+    private static string Quote(string value) => $"\"{value}\"";
+
     private void OnClientConnected(ACTcpClient sender, EventArgs args)
     {
-        sender.FirstUpdateSent += OnFirstUpdateSent;
+        // LuaReady instead of FirstUpdateSent: the client can only receive online events once its scripts are loaded.
+        sender.LuaReady += OnLuaReady;
     }
 
-    private void OnFirstUpdateSent(ACTcpClient sender, EventArgs args)
+    private void OnLuaReady(ACTcpClient sender, EventArgs args)
     {
         List<CarColorState> colors;
         lock (_lock)
@@ -64,34 +71,58 @@ public class CarColorPlugin : IHostedService
         foreach (var state in colors)
         {
             if (state.SessionId == sender.SessionId) continue;
-            sender.SendPacket(new CarColorUpdatePacket
-            {
-                SessionId = state.SessionId,
-                Color = state.Color,
-                Metallic = state.Metallic,
-                Roughness = state.Roughness,
-                CaliperColor = state.CaliperColor,
-                HasCaliper = state.HasCaliper
-            });
+            sender.SendPacket(CreateUpdate(state));
         }
     }
 
     private void OnClientDisconnected(ACTcpClient sender, EventArgs args)
     {
+        bool removed;
         lock (_lock)
         {
-            _playerColors.Remove(sender.SessionId);
+            removed = _playerColors.Remove(sender.SessionId);
+        }
+
+        if (removed)
+        {
+            // Neither body nor caliper set = other clients reset this car to its stock skin.
+            _entryCarManager.BroadcastPacket(new CarColorUpdatePacket { SessionId = sender.SessionId });
         }
     }
 
+    private static float SanitizeFinish(float value)
+    {
+        // Negative (or NaN) means "finish not set / leave unchanged".
+        return float.IsNaN(value) || value < 0 ? -1.0f : Math.Clamp(value, 0.0f, 1.0f);
+    }
+
+    private static CarColorUpdatePacket CreateUpdate(CarColorState state) => new()
+    {
+        SessionId = state.SessionId,
+        HasBody = state.HasBody,
+        Color = state.Color,
+        HasCaliper = state.HasCaliper,
+        CaliperColor = state.CaliperColor,
+        Metallic = state.Metallic,
+        Roughness = state.Roughness
+    };
+
     private void OnColorChangeReceived(ACTcpClient client, CarColorChangePacket packet)
     {
+        if (_config.AllowedCarModels.Count > 0 && !_config.AllowedCarModels.Contains(client.EntryCar.Model))
+            return;
+
         var now = DateTime.UtcNow;
+        var metallic = SanitizeFinish(packet.Metallic);
+        var roughness = SanitizeFinish(packet.Roughness);
+        // A finish only makes sense when both values are set.
+        if (metallic < 0 || roughness < 0)
+        {
+            metallic = -1.0f;
+            roughness = -1.0f;
+        }
 
-        // Validate and clamp values
-        var metallic = float.IsNaN(packet.Metallic) ? 0.0f : Math.Clamp(packet.Metallic, 0.0f, 1.0f);
-        var roughness = float.IsNaN(packet.Roughness) ? 0.0f : Math.Clamp(packet.Roughness, 0.0f, 1.0f);
-
+        CarColorState state;
         lock (_lock)
         {
             if (_playerColors.TryGetValue(client.SessionId, out var lastChange)
@@ -100,30 +131,32 @@ public class CarColorPlugin : IHostedService
                 return;
             }
 
-            _playerColors[client.SessionId] = new CarColorState
+            state = new CarColorState
             {
                 SessionId = client.SessionId,
+                HasBody = packet.HasBody,
                 Color = packet.Color,
                 Metallic = metallic,
                 Roughness = roughness,
-                CaliperColor = packet.CaliperColor,
                 HasCaliper = packet.HasCaliper,
+                CaliperColor = packet.CaliperColor,
                 LastChangeTime = now
             };
+
+            if (!state.HasBody && !state.HasCaliper)
+            {
+                _playerColors.Remove(client.SessionId);
+            }
+            else
+            {
+                _playerColors[client.SessionId] = state;
+            }
         }
 
-        Log.Information("{ClientName} ({SessionId}) changed car color to {Color} (Metallic: {Metallic}, Roughness: {Roughness}, Caliper: {Caliper})",
-            client.Name, client.SessionId, packet.Color, metallic, roughness, packet.CaliperColor);
+        Log.Information("{ClientName} ({SessionId}) changed car color (Body: {HasBody} {Color}, Metallic: {Metallic}, Roughness: {Roughness}, Caliper: {HasCaliper} {Caliper})",
+            client.Name, client.SessionId, state.HasBody, state.Color, metallic, roughness, state.HasCaliper, state.CaliperColor);
 
-        _entryCarManager.BroadcastPacket(new CarColorUpdatePacket
-        {
-            SessionId = client.SessionId,
-            Color = packet.Color,
-            Metallic = metallic,
-            Roughness = roughness,
-            CaliperColor = packet.CaliperColor,
-            HasCaliper = packet.HasCaliper
-        }, client);
+        _entryCarManager.BroadcastPacket(CreateUpdate(state), client);
     }
 
     public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
@@ -134,51 +167,57 @@ public class CarColorPlugin : IHostedService
 public class CarColorState
 {
     public byte SessionId { get; set; }
+    public bool HasBody { get; set; }
     public System.Drawing.Color Color { get; set; }
     public float Metallic { get; set; }
     public float Roughness { get; set; }
-    public System.Drawing.Color CaliperColor { get; set; }
     public bool HasCaliper { get; set; }
+    public System.Drawing.Color CaliperColor { get; set; }
     public DateTime LastChangeTime { get; set; }
 }
 
+// Client -> server. Field names/types must match the ac.OnlineEvent "AS_CarColor" in lua/carcolor.lua.
 [OnlineEvent(Key = "AS_CarColor")]
 public class CarColorChangePacket : OnlineEvent<CarColorChangePacket>
 {
+    [OnlineEventField(Name = "hasBody")]
+    public bool HasBody;
+
     [OnlineEventField(Name = "color")]
     public System.Drawing.Color Color;
+
+    [OnlineEventField(Name = "hasCaliper")]
+    public bool HasCaliper;
+
+    [OnlineEventField(Name = "caliperColor")]
+    public System.Drawing.Color CaliperColor;
 
     [OnlineEventField(Name = "metallic")]
     public float Metallic;
 
     [OnlineEventField(Name = "roughness")]
     public float Roughness;
-
-    [OnlineEventField(Name = "caliperColor")]
-    public System.Drawing.Color CaliperColor;
-
-    [OnlineEventField(Name = "hasCaliper")]
-    public bool HasCaliper;
 }
 
+// Server -> clients. The car is identified by the message sender (SessionId). Must match "AS_CarColorUpdate" in lua/carcolor.lua.
 [OnlineEvent(Key = "AS_CarColorUpdate")]
 public class CarColorUpdatePacket : OnlineEvent<CarColorUpdatePacket>
 {
-    [OnlineEventField(Name = "sessionId")]
-    public byte SessionId;
+    [OnlineEventField(Name = "hasBody")]
+    public bool HasBody;
 
     [OnlineEventField(Name = "color")]
     public System.Drawing.Color Color;
+
+    [OnlineEventField(Name = "hasCaliper")]
+    public bool HasCaliper;
+
+    [OnlineEventField(Name = "caliperColor")]
+    public System.Drawing.Color CaliperColor;
 
     [OnlineEventField(Name = "metallic")]
     public float Metallic;
 
     [OnlineEventField(Name = "roughness")]
     public float Roughness;
-
-    [OnlineEventField(Name = "caliperColor")]
-    public System.Drawing.Color CaliperColor;
-
-    [OnlineEventField(Name = "hasCaliper")]
-    public bool HasCaliper;
 }

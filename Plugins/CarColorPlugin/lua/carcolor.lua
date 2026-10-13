@@ -1,405 +1,404 @@
--- Car Color Plugin - Client Side
--- CSP 4130 (Preview595) compatible
+-- Car Color Plugin - client side (target: CSP 4130 / Preview595).
+-- Config comes from CarColorPlugin.cs through ac.configValues; keys must match that file.
+-- Networking: we send "AS_CarColor" to the server, the server relays "AS_CarColorUpdate" to other players.
 
-local config = ac.configValues()
-local presets = config.presets or {}
-local bodyMaterialNames = config.bodyMaterialNames or {"carpaint", "body", "paint"}
-local caliperMaterialNames = config.caliperMaterialNames or {"caliper", "brake", "disc"}
-local cooldownSeconds = config.changeCooldownSeconds or 1.0
-local maxHistory = config.maxHistory or 10
-local maxFavourites = config.maxFavourites or 50
+local cfg = ac.configValues({
+    presets = "",
+    bodyMaterialNames = "",
+    caliperMaterialNames = "",
+    changeCooldownSeconds = 1.0,
+    maxHistory = 10,
+    maxFavourites = 50,
+})
 
-local lastColorChange = 0
-local currentColor = nil
-local currentMetallic = 0.5
-local currentRoughness = 0.5
-local currentCaliperColor = nil
-local hasCaliper = false
-local storageKey = "carColorPlugin"
+local cooldown = tonumber(cfg.changeCooldownSeconds) or 1.0
+local maxHistory = math.floor(tonumber(cfg.maxHistory) or 10)
+local maxFavourites = math.floor(tonumber(cfg.maxFavourites) or 50)
 
-local history = {}
-local favourites = {}
+-- ---------- helpers ----------
 
-local function hexToRgb(hex)
-    hex = hex:gsub("#", "")
-    if #hex == 3 then
-        hex = hex:sub(1,1)..hex:sub(1,1)..hex:sub(2,2)..hex:sub(2,2)..hex:sub(3,3)..hex:sub(3,3)
+local function normHex(s)
+    s = tostring(s or '')
+    s = s:gsub('[#%s]', '')
+    if #s == 3 then
+        s = s:sub(1, 1):rep(2) .. s:sub(2, 2):rep(2) .. s:sub(3, 3):rep(2)
     end
-    if #hex < 6 then
-        return 255, 255, 255
+    if #s ~= 6 or s:find('[^%x]') then return nil end
+    return s:upper()
+end
+
+local function hexToRgbm(hex)
+    local r = tonumber(hex:sub(1, 2), 16) or 255
+    local g = tonumber(hex:sub(3, 4), 16) or 255
+    local b = tonumber(hex:sub(5, 6), 16) or 255
+    return rgbm(r / 255, g / 255, b / 255, 1)
+end
+
+local function splitList(s)
+    local out = {}
+    for item in tostring(s or ''):gmatch('[^,]+') do
+        local trimmed = item:gsub('^%s+', ''):gsub('%s+$', '')
+        if trimmed ~= '' then out[#out + 1] = trimmed end
     end
-    local r = tonumber("0x"..hex:sub(1,2)) or 255
-    local g = tonumber("0x"..hex:sub(3,4)) or 255
-    local b = tonumber("0x"..hex:sub(5,6)) or 255
-    return r, g, b
+    return out
 end
 
-local function rgbToHex(r, g, b)
-    return string.format("#%02X%02X%02X", r, g, b)
-end
-
-local function getCarColor()
-    local car = ac.car()
-    if not car then return nil end
-    
-    local storage = ac.storage()
-    local carModel = car.modelName or "unknown"
-    local savedColor = storage[storageKey .. "_" .. carModel]
-    
-    if savedColor then
-        return hexToRgb(savedColor)
+local function parseHexList(s)
+    local out = {}
+    for _, item in ipairs(splitList(s)) do
+        local hex = normHex(item)
+        if hex then out[#out + 1] = hex end
     end
-    
-    return 255, 255, 255
+    return out
 end
 
-local function saveCarColor(r, g, b)
-    local car = ac.car()
-    if not car then return end
-    
-    local storage = ac.storage()
-    local carModel = car.modelName or "unknown"
-    local hex = rgbToHex(r, g, b)
-    storage[storageKey .. "_" .. carModel] = hex
+local presets = parseHexList(cfg.presets)
+if #presets == 0 then
+    presets = { 'FF0000', '00FF00', '0000FF', 'FFFF00', 'FF00FF', '00FFFF', 'FFA500', '800080', '008000', '000080', '808080', 'FFFFFF' }
 end
 
-local function applyColorToCar(r, g, b, metallic, roughness)
-    local car = ac.car()
-    if not car then return end
-    
-    local nodes = ac.findNodes('carRoot:0')
-    if not nodes then return end
-    
-    for _, node in ipairs(nodes) do
-        local mesh = node:findMeshes()
-        if not mesh then
-            goto continue_node
-        end
-        
-        for _, material in ipairs(mesh) do
-            local materialName = material.name:lower()
-            
-            for _, bodyName in ipairs(bodyMaterialNames) do
-                if materialName:find(bodyName, 1, true) then
-                    -- UNVERIFIED: material property setter for body color
-                    -- This is the most uncertain part - exact property names vary by CSP version
-                    if material.setColor then
-                        material:setColor(r/255, g/255, b/255, 1.0)
-                    end
-                    break
-                end
-            end
-        end
-        ::continue_node::
-    end
-end
+local bodyNames = splitList(cfg.bodyMaterialNames)
+if #bodyNames == 0 then bodyNames = { 'carpaint', 'body', 'paint' } end
+local caliperNames = splitList(cfg.caliperMaterialNames)
+if #caliperNames == 0 then caliperNames = { 'caliper', 'brake', 'disc' } end
 
-local function applyCaliperColor(r, g, b)
-    local car = ac.car()
-    if not car then return end
-    
-    local nodes = ac.findNodes('carRoot:0')
-    if not nodes then return end
-    
-    for _, node in ipairs(nodes) do
-        local mesh = node:findMeshes()
-        if not mesh then
-            goto continue_node
-        end
-        
-        for _, material in ipairs(mesh) do
-            local materialName = material.name:lower()
-            
-            for _, caliperName in ipairs(caliperMaterialNames) do
-                if materialName:find(caliperName, 1, true) then
-                    if material.setColor then
-                        material:setColor(r/255, g/255, b/255, 1.0)
-                    end
-                    break
-                end
-            end
-        end
-        ::continue_node::
-    end
-end
-
-local function sendColorChange(r, g, b, metallic, roughness, caliperR, caliperG, caliperB, hasCaliper)
-    local now = os.time()
-    if now - lastColorChange < cooldownSeconds then return end
-    
-    lastColorChange = now
-    currentColor = {r, g, b}
-    currentMetallic = metallic
-    currentRoughness = roughness
-    currentCaliperColor = {caliperR, caliperG, caliperB}
-    hasCaliper = hasCaliper
-    
-    ac.sendLuaMessage({
-        type = "AS_CarColor",
-        color = {r, g, b},
-        metallic = metallic,
-        roughness = roughness,
-        caliperColor = {caliperR, caliperG, caliperB},
-        hasCaliper = hasCaliper
-    })
-    
-    saveCarColor(r, g, b)
-end
-
-local function receiveColorUpdate(data)
-    local senderGuid = data.senderGuid
-    local r, g, b = data.color[1], data.color[2], data.color[3]
-    local metallic = data.metallic or 0.5
-    local roughness = data.roughness or 0.5
-    local caliperR, caliperG, caliperB = data.caliperColor[1], data.caliperColor[2], data.caliperColor[3]
-    local hasCaliper = data.hasCaliper or false
-    
-    -- Apply to remote car (this would need session/car mapping)
-    -- UNVERIFIED: How to identify remote car by senderGuid
-end
-
-local function addToHistory(hexColor)
-    -- Remove if exists
-    for i, color in ipairs(history) do
-        if color == hexColor then
-            table.remove(history, i)
-            break
+-- Same filter style as TagModePlugin; material names are matched case sensitively, so add variants.
+local function nameFilter(names)
+    local parts = {}
+    for _, n in ipairs(names) do
+        local lower = n:lower()
+        local cap = lower:sub(1, 1):upper() .. lower:sub(2)
+        for _, v in ipairs({ lower, cap, lower:upper() }) do
+            parts[#parts + 1] = 'material:?' .. v .. '?'
         end
     end
-    
-    -- Add to front
-    table.insert(history, 1, hexColor)
-    
-    -- Trim to max
-    while #history > maxHistory do
-        table.remove(history)
-    end
-    
-    -- Save to storage
-    local storage = ac.storage()
-    storage[storageKey .. "_history"] = table.concat(history, ",")
+    return table.concat(parts, ' | ')
 end
 
-local function addToFavourites(hexColor)
-    -- Check if exists
-    for _, color in ipairs(favourites) do
-        if color == hexColor then
-            return
-        end
+local bodyFilter = '{ shader:smCarPaint | ' .. nameFilter(bodyNames) .. ' }'
+local caliperFilter = '{ ' .. nameFilter(caliperNames) .. ' }'
+
+-- ---------- persistent per-player settings ----------
+
+local store = ac.storage({
+    body = '',
+    caliper = 'FF0000',
+    useCaliper = false,
+    finishSet = false,
+    metallic = 0.5,
+    roughness = 0.5,
+    history = '',
+    favourites = '',
+})
+
+local history = parseHexList(store.history)
+local favourites = parseHexList(store.favourites)
+
+local function saveLists()
+    store.history = table.concat(history, ',')
+    store.favourites = table.concat(favourites, ',')
+end
+
+local function indexOf(list, hex)
+    for i, v in ipairs(list) do
+        if v == hex then return i end
     end
-    
-    -- Check max
+    return nil
+end
+
+local function pushHistory(hex)
+    local i = indexOf(history, hex)
+    if i then table.remove(history, i) end
+    table.insert(history, 1, hex)
+    while #history > maxHistory do table.remove(history) end
+    saveLists()
+end
+
+local function addFavourite(hex)
+    if indexOf(favourites, hex) then return end
     if #favourites >= maxFavourites then
-        ac.log("Favourites list is full (max " .. maxFavourites .. ")")
+        ui.toast(ui.Icons.Ban, 'Favourites list is full (max ' .. maxFavourites .. ')')
         return
     end
-    
-    -- Add to front
-    table.insert(favourites, 1, hexColor)
-    
-    -- Save to storage
-    local storage = ac.storage()
-    storage[storageKey .. "_favourites"] = table.concat(favourites, ",")
+    table.insert(favourites, 1, hex)
+    saveLists()
 end
 
-local function loadHistory()
-    local storage = ac.storage()
-    local historyStr = storage[storageKey .. "_history"]
-    if historyStr then
-        for color in historyStr:gmatch("[^,]+") do
-            table.insert(history, color)
+local function removeFavourite(hex)
+    local i = indexOf(favourites, hex)
+    if i then
+        table.remove(favourites, i)
+        saveLists()
+    end
+end
+
+-- ---------- applying colors to car nodes ----------
+
+local finishSupported = true
+
+-- st: { body = rgbm?, caliper = rgbm?, metallic = number?, roughness = number? }
+local function applyToCar(index, st)
+    local ok = pcall(function()
+        local root = ac.findNodes('carRoot:' .. index)
+        root:resetSkin()
+
+        if st.body then
+            local bodyMeshes = root:findMeshes(bodyFilter)
+            bodyMeshes:setMaterialTexture('txDiffuse', st.body)
+
+            if st.metallic and st.roughness then
+                -- ASSUMED: setMaterialProperty and the smCarPaint property names exist in CSP 4130.
+                local finishOk = pcall(function()
+                    bodyMeshes:setMaterialProperty('ksSpecular', st.metallic)
+                    bodyMeshes:setMaterialProperty('ksSpecularEXP', 1 + (1 - st.roughness) * 299)
+                end)
+                if not finishOk then finishSupported = false end
+            end
+        end
+
+        if st.caliper then
+            root:findMeshes(caliperFilter):setMaterialTexture('txDiffuse', st.caliper)
+        end
+
+        ac.refreshCarColor(index)
+    end)
+    if not ok then ac.log('CarColor: failed to apply colors to car ' .. tostring(index)) end
+end
+
+local function ownRenderState()
+    local st = {}
+    local body = normHex(store.body)
+    if body then
+        st.body = hexToRgbm(body)
+        if store.finishSet then
+            st.metallic = store.metallic
+            st.roughness = store.roughness
+        end
+    end
+    if store.useCaliper then
+        local c = normHex(store.caliper)
+        if c then st.caliper = hexToRgbm(c) end
+    end
+    return st
+end
+
+local function applyOwn()
+    applyToCar(0, ownRenderState())
+end
+
+-- ---------- networking ----------
+
+-- Client -> server. Field names/types must match CarColorChangePacket in CarColorPlugin.cs.
+local colorEvent = ac.OnlineEvent({
+    ac.StructItem.key('AS_CarColor'),
+    hasBody = ac.StructItem.boolean(),
+    color = ac.StructItem.rgbm(),
+    hasCaliper = ac.StructItem.boolean(),
+    caliperColor = ac.StructItem.rgbm(),
+    metallic = ac.StructItem.float(),
+    roughness = ac.StructItem.float(),
+})
+
+-- Server -> clients. Field names/types must match CarColorUpdatePacket in CarColorPlugin.cs.
+-- The car is identified by the sender of the message.
+local colorUpdateEvent = ac.OnlineEvent({
+    ac.StructItem.key('AS_CarColorUpdate'),
+    hasBody = ac.StructItem.boolean(),
+    color = ac.StructItem.rgbm(),
+    hasCaliper = ac.StructItem.boolean(),
+    caliperColor = ac.StructItem.rgbm(),
+    metallic = ac.StructItem.float(),
+    roughness = ac.StructItem.float(),
+}, function(sender, message)
+    if sender == nil or sender.index == 0 then return end
+
+    local st = {}
+    if message.hasBody then
+        st.body = message.color
+        if message.metallic >= 0 and message.roughness >= 0 then
+            st.metallic = message.metallic
+            st.roughness = message.roughness
+        end
+    end
+    if message.hasCaliper then st.caliper = message.caliperColor end
+    applyToCar(sender.index, st)
+end)
+
+local pendingSendAt = nil
+local lastSentAt = -1000
+
+local function queueSend(delay)
+    pendingSendAt = os.clock() + (delay or 0)
+end
+
+local function sendState()
+    local st = ownRenderState()
+    colorEvent({
+        hasBody = st.body ~= nil,
+        color = st.body or rgbm(1, 1, 1, 1),
+        hasCaliper = st.caliper ~= nil,
+        caliperColor = st.caliper or rgbm(1, 1, 1, 1),
+        metallic = st.metallic or -1,
+        roughness = st.roughness or -1,
+    })
+end
+
+-- Throttled so the server-side cooldown does not drop changes (e.g. while dragging sliders).
+function script.update(dt)
+    if pendingSendAt ~= nil then
+        local now = os.clock()
+        if now >= pendingSendAt and now - lastSentAt >= cooldown + 0.25 then
+            pendingSendAt = nil
+            lastSentAt = now
+            sendState()
         end
     end
 end
 
-local function loadFavourites()
-    local storage = ac.storage()
-    local favouritesStr = storage[storageKey .. "_favourites"]
-    if favouritesStr then
-        for color in favouritesStr:gmatch("[^,]+") do
-            table.insert(favourites, color)
+-- ---------- actions ----------
+
+local function setBody(hex)
+    hex = normHex(hex)
+    if not hex then return end
+    store.body = hex
+    pushHistory(hex)
+    applyOwn()
+    queueSend(0)
+end
+
+local function setCaliper(hex)
+    hex = normHex(hex)
+    if not hex then return end
+    store.caliper = hex
+    store.useCaliper = true
+    applyOwn()
+    queueSend(0)
+end
+
+local function setFinish(metallic, roughness, delay)
+    store.metallic = metallic
+    store.roughness = roughness
+    store.finishSet = true
+    applyOwn()
+    queueSend(delay or 0)
+end
+
+local function resetAll()
+    store.body = ''
+    store.useCaliper = false
+    store.finishSet = false
+    applyOwn()
+    queueSend(0)
+end
+
+-- ---------- UI ----------
+
+local hexInput = ''
+local removeMode = false
+
+local function swatch(id, hex, size)
+    local c = hexToRgbm(hex)
+    ui.pushStyleColor(ui.StyleColor.Button, c)
+    ui.pushStyleColor(ui.StyleColor.ButtonHovered, c)
+    ui.pushStyleColor(ui.StyleColor.ButtonActive, c)
+    local clicked = ui.button('##cc_' .. id, vec2(size, size))
+    ui.popStyleColor(3)
+    if ui.itemHovered() then ui.setTooltip('#' .. hex) end
+    return clicked
+end
+
+-- Returns the hex of the clicked swatch (or nil); callers act after the loop so lists are not modified mid-iteration.
+local function swatchRow(prefix, list)
+    local clicked = nil
+    for i, hex in ipairs(list) do
+        if (i - 1) % 8 ~= 0 then ui.sameLine(0, 4) end
+        if swatch(prefix .. i, hex, 26) then clicked = hex end
+    end
+    return clicked
+end
+
+local function window()
+    ui.pushFont(ui.Font.Title)
+    ui.text('CAR COLOR')
+    ui.popFont()
+    ui.separator()
+
+    -- Body color
+    ui.text('Body color')
+    local picked = swatchRow('p', presets)
+    if picked then setBody(picked) end
+
+    ui.text('Custom hex (e.g. FF8800)')
+    hexInput = ui.inputText('##cc_hex', hexInput)
+    if ui.button('Set body') then setBody(hexInput) end
+    ui.sameLine()
+    if ui.button('Set caliper') then setCaliper(hexInput) end
+
+    -- Finish
+    ui.separator()
+    ui.text('Finish')
+    if not normHex(store.body) then
+        ui.textWrapped('Pick a body color first to change the finish.')
+    else
+        if ui.button('Matte') then setFinish(0.0, 1.0) end
+        ui.sameLine()
+        if ui.button('Gloss') then setFinish(0.3, 0.0) end
+        ui.sameLine()
+        if ui.button('Metallic') then setFinish(1.0, 0.2) end
+
+        local m, mChanged = ui.slider('##cc_metal', store.metallic * 100, 0, 100, 'Metallic: %.0f%%')
+        if mChanged then setFinish(m / 100, store.roughness, 0.4) end
+        local r, rChanged = ui.slider('##cc_rough', store.roughness * 100, 0, 100, 'Roughness: %.0f%%')
+        if rChanged then setFinish(store.metallic, r / 100, 0.4) end
+
+        if not finishSupported then
+            ui.textWrapped('Finish is not supported by this CSP build; only the color is applied.')
         end
     end
-end
 
-local function onColorPresetSelected(hexColor)
-    local r, g, b = hexToRgb(hexColor)
-    sendColorChange(r, g, b, currentMetallic, currentRoughness, r, g, b, true)
-    addToHistory(hexColor)
-end
-
-local function onResetColor()
-    local r, g, b = getCarColor()
-    sendColorChange(r, g, b, currentMetallic, currentRoughness, r, g, b, true)
-    addToHistory(rgbToHex(r, g, b))
-end
-
-local function onFavouriteCurrentColor()
-    local r, g, b = currentColor[1], currentColor[2], currentColor[3]
-    local hex = rgbToHex(r, g, b)
-    addToFavourites(hex)
-end
-
-local function onMatte()
-    currentRoughness = 1.0
-    currentMetallic = 0.0
-    sendColorChange(currentColor[1], currentColor[2], currentColor[3], currentMetallic, currentRoughness, currentCaliperColor[1], currentCaliperColor[2], currentCaliperColor[3], hasCaliper)
-end
-
-local function onMetallic()
-    currentMetallic = 1.0
-    currentRoughness = 0.0
-    sendColorChange(currentColor[1], currentColor[2], currentColor[3], currentMetallic, currentRoughness, currentCaliperColor[1], currentCaliperColor[2], currentCaliperColor[3], hasCaliper)
-end
-
-local function onGloss()
-    currentMetallic = 1.0
-    currentRoughness = 0.0
-    sendColorChange(currentColor[1], currentColor[2], currentColor[3], currentMetallic, currentRoughness, currentCaliperColor[1], currentCaliperColor[2], currentCaliperColor[3], hasCaliper)
-end
-
-local function onCaliperColorPresetSelected(hexColor)
-    local r, g, b = hexToRgb(hexColor)
-    sendColorChange(currentColor[1], currentColor[2], currentColor[3], currentMetallic, currentRoughness, r, g, b, true)
-end
-
-local function onResetCaliperColor()
-    local r, g, b = currentCaliperColor[1], currentCaliperColor[2], currentCaliperColor[3]
-    sendColorChange(currentColor[1], currentColor[2], currentColor[3], currentMetallic, currentRoughness, r, g, b, true)
-end
-
-local function drawColorPicker()
-    local windowSize = ac.getUI().windowSize
-    local width, height = 400, 600
-    
-    local x = (windowSize[1] - width) / 2
-    local y = (windowSize[2] - height) / 2
-    
-    local ui = ac.getUI()
-    local transparentWindow = ui.transparentWindow
-    
-    transparentWindow:drawRectFilled(x, y, width, height, 0, 0, 0, 200)
-    
-    -- Title
-    ui:drawText(x + 10, y + 10, "Car Color", 16, 255, 255, 255, 255)
-    
-    -- Preset colors
-    local startX = x + 10
-    local startY = y + 40
-    local swatchSize = 30
-    local cols = 4
-    
-    for i, hexColor in ipairs(presets) do
-        local col = ((i - 1) % cols) + 1
-        local row = math.floor((i - 1) / cols) + 1
-        
-        local px = startX + (col - 1) * (swatchSize + 5)
-        local py = startY + (row - 1) * (swatchSize + 5)
-        
-        local r, g, b = hexToRgb(hexColor)
-        ui:drawRectFilled(px, py, swatchSize, swatchSize, r, g, b, 255)
-        
-        if ui.isMouseOver and ui.isMouseOver(px, py, swatchSize, swatchSize) and ui.isMousePressed and ui.isMousePressed() then
-            onColorPresetSelected(hexColor)
-        end
+    -- Caliper
+    ui.separator()
+    ui.text('Caliper color')
+    local caliperPicked = swatchRow('c', presets)
+    if caliperPicked then setCaliper(caliperPicked) end
+    if ui.checkbox('Paint calipers', store.useCaliper) then
+        store.useCaliper = not store.useCaliper
+        applyOwn()
+        queueSend(0)
     end
-    
-    -- History
-    ui:drawText(x + 10, y + 200, "History", 14, 255, 255, 255, 255)
-    local historyStartY = y + 220
-    for i, hexColor in ipairs(history) do
-        if i > 10 then break end
-        local r, g, b = hexToRgb(hexColor)
-        local px = x + 10 + ((i - 1) % 10) * (swatchSize + 5)
-        local py = historyStartY + math.floor((i - 1) / 10) * (swatchSize + 5)
-        ui:drawRectFilled(px, py, swatchSize, swatchSize, r, g, b, 255)
-    end
-    
+
     -- Favourites
-    ui:drawText(x + 10, y + 350, "Favourites", 14, 255, 255, 255, 255)
-    local favStartY = y + 370
-    for i, hexColor in ipairs(favourites) do
-        if i > 10 then break end
-        local r, g, b = hexToRgb(hexColor)
-        local px = x + 10 + ((i - 1) % 10) * (swatchSize + 5)
-        local py = favStartY + math.floor((i - 1) / 10) * (swatchSize + 5)
-        ui:drawRectFilled(px, py, swatchSize, swatchSize, r, g, b, 255)
+    ui.separator()
+    ui.text('Favourites (' .. #favourites .. '/' .. maxFavourites .. ')')
+    local body = normHex(store.body)
+    if body and ui.button('Add current color') then addFavourite(body) end
+    if ui.checkbox('Click a favourite to remove it', removeMode) then removeMode = not removeMode end
+    local favPicked = swatchRow('f', favourites)
+    if favPicked then
+        if removeMode then removeFavourite(favPicked) else setBody(favPicked) end
     end
-    
-    -- Finish controls
-    ui:drawText(x + 10, y + 500, "Finish", 14, 255, 255, 255, 255)
-    
-    -- Matte button
-    local matteX = x + 10
-    local matteY = y + 520
-    local matteWidth = 120
-    local matteHeight = 30
-    ui:drawRectFilled(matteX, matteY, matteWidth, matteHeight, 100, 100, 100, 255)
-    ui:drawText(matteX + 10, matteY + 10, "Matte", 12, 255, 255, 255, 255)
-    
-    -- Metallic button
-    local metallicX = x + 140
-    local metallicY = y + 520
-    local metallicWidth = 120
-    local metallicHeight = 30
-    ui:drawRectFilled(metallicX, metallicY, metallicWidth, metallicHeight, 100, 100, 100, 255)
-    ui:drawText(metallicX + 10, metallicY + 10, "Metallic", 12, 255, 255, 255, 255)
-    
-    -- Gloss button
-    local glossX = x + 270
-    local glossY = y + 520
-    local glossWidth = 120
-    local glossHeight = 30
-    ui:drawRectFilled(glossX, glossY, glossWidth, glossHeight, 100, 100, 100, 255)
-    ui:drawText(glossX + 10, glossY + 10, "Gloss", 12, 255, 255, 255, 255)
-    
-    -- Caliper color
-    ui:drawText(x + 10, y + 560, "Caliper", 14, 255, 255, 255, 255)
-    local caliperStartY = y + 580
-    for i, hexColor in ipairs(presets) do
-        if i > 5 then break end
-        local r, g, b = hexToRgb(hexColor)
-        local px = x + 10 + ((i - 1) % 5) * (swatchSize + 5)
-        local py = caliperStartY
-        ui:drawRectFilled(px, py, swatchSize, swatchSize, r, g, b, 255)
+
+    -- History
+    ui.separator()
+    ui.text('History')
+    local histPicked = swatchRow('h', history)
+    if histPicked then setBody(histPicked) end
+    if #history > 0 and ui.button('Clear history') then
+        history = {}
+        saveLists()
     end
-    
-    -- Reset caliper button
-    local resetCaliperX = x + 10
-    local resetCaliperY = y + 600
-    local resetCaliperWidth = 120
-    local resetCaliperHeight = 30
-    ui:drawRectFilled(resetCaliperX, resetCaliperY, resetCaliperWidth, resetCaliperHeight, 100, 100, 100, 255)
-    ui:drawText(resetCaliperX + 10, resetCaliperY + 10, "Reset Caliper", 12, 255, 255, 255, 255)
-    
-    -- Favourite button
-    local favX = x + 140
-    local favY = y + 600
-    local favWidth = 120
-    local favHeight = 30
-    ui:drawRectFilled(favX, favY, favWidth, favHeight, 100, 100, 100, 255)
-    ui:drawText(favX + 10, favY + 10, "Favourite", 12, 255, 255, 255, 255)
+
+    ui.separator()
+    if ui.button('Reset to stock') then resetAll() end
 end
 
--- Register the settings window
-ac.registerOnlineExtra("CarColor", drawColorPicker)
+ui.registerOnlineExtra(ui.Icons.SettingsAlt, 'Car Color', function() return true end, window, nil, ui.OnlineExtraFlags.Tool)
 
--- Listen for color updates from server
-ac.addLuaMessageListener(function(msg)
-    if msg.type == "AS_CarColorUpdate" then
-        receiveColorUpdate(msg)
+-- Apply the saved look to our own car after load and tell the server about it.
+setTimeout(function()
+    local st = ownRenderState()
+    if st.body or st.caliper then
+        applyOwn()
+        queueSend(0)
     end
-end)
-
--- Apply color on car spawn
-ac.onCarSpawned(function()
-    local r, g, b = getCarColor()
-    applyColorToCar(r, g, b, currentMetallic, currentRoughness)
-    if hasCaliper and currentCaliperColor then
-        applyCaliperColor(currentCaliperColor[1], currentCaliperColor[2], currentCaliperColor[3])
-    end
-end)
-
--- Load history and favourites
-loadHistory()
-loadFavourites()
+end, 2)
