@@ -436,9 +436,30 @@ local preview = {
     yaw = math.rad(35),
     pitch = math.rad(12),
     dragging = false,
-    size = vec2(1024, 768), -- render resolution; the on-screen shape is 4:3
-    zoom = 1.0,             -- 1 = default distance, smaller = closer
+    size = vec2(1024, 1024), -- square: the window is narrow, so this makes the preview taller
+    zoom = 0.8,              -- 1 = default distance, smaller = closer
+    shadings = {},           -- shader types that exist in this CSP build
+    shadingIndex = 1,
 }
+
+local function collectShadings()
+    local list = {}
+    local types = render and render.ShadersType
+    if types then
+        for _, name in ipairs({ 'Main', 'Default', 'Original', 'Simplified', 'Simplest' }) do
+            if types[name] ~= nil then list[#list + 1] = { name = name, value = types[name] } end
+        end
+    end
+    return list
+end
+
+local function applyShading()
+    local entry = preview.shadings[preview.shadingIndex]
+    if preview.shot and entry then
+        pcall(function() preview.shot:setShadersType(entry.value) end)
+        ac.log('CarColor: preview shading = ' .. entry.name)
+    end
+end
 
 local function ensurePreviewShot()
     if preview.shot or preview.failed then return preview.shot end
@@ -446,18 +467,16 @@ local function ensurePreviewShot()
     local ok, shot = pcall(function()
         local s = ac.GeometryShot(ac.findNodes('carRoot:0'), preview.size, 1, false)
         s:setClippingPlanes(0.1, 200)
-
-        -- ASSUMED: a "full" shaders type exists so lights/paint render properly. Falls back to Simplified (used in FastTravelPlugin).
-        local types = render and render.ShadersType
-        if types then
-            local t = types.Main or types.Default or types.Original or types.Simplified
-            if t then s:setShadersType(t) end
-        end
+        -- Calmer ambient light to reduce washed-out highlights (setAmbientColor is used on GeometryShot in FastTravelPlugin)
+        pcall(function() s:setAmbientColor(rgbm(0.5, 0.5, 0.5, 1)) end)
         return s
     end)
 
     if ok and shot then
         preview.shot = shot
+        preview.shadings = collectShadings()
+        preview.shadingIndex = 1
+        applyShading()
     else
         preview.failed = true
         ac.log('CarColor: live preview unavailable, using swatch strip')
@@ -485,8 +504,8 @@ local function drawCarPreview()
     pcall(function()
         if car.aabbSize and car.aabbSize.z > 1 then length = car.aabbSize.z end
     end)
-    local dist = length * 1.55 * preview.zoom
-
+    local dist = length * 1.3 * preview.zoom
+    
     local a = heading + preview.yaw
     local horizontal = math.cos(preview.pitch) * dist
     local target = vec3(pos.x, pos.y + 0.5, pos.z)
@@ -686,8 +705,15 @@ local function window()
     ui.separator()
     
     if not drawCarPreview() then drawPreviewStrip() end
+    if #preview.shadings > 1 then
+        local entry = preview.shadings[preview.shadingIndex]
+        if ui.button('Preview shading: ' .. entry.name .. '##cc_shading', vec2(ui.availableSpaceX(), 22)) then
+            preview.shadingIndex = preview.shadingIndex % #preview.shadings + 1
+            applyShading()
+        end
+    end
     ui.offsetCursorY(6)
-
+    
     drawTargetCombo()
     if target == 'caliper' then
         if ui.checkbox('Paint calipers', draft.useCaliper) then
