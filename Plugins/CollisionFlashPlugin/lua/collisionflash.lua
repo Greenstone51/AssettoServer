@@ -6,6 +6,7 @@ local PLUGIN_ID = 'collisionflash'
 local cfg = ac.configValues({
   durationSeconds = 0.35,
   opacity = 0.7,
+  showInPits = true,
 })
 
 -- Per-player settings, saved on the player's PC
@@ -13,6 +14,7 @@ local store = ac.storage({
   tlx = 0, tly = 0, brx = 1, bry = 1,
   opacity = cfg.opacity,
   duration = cfg.durationSeconds,
+  showInPits = cfg.showInPits,
 })
 
 local sim = ac.getSim()
@@ -59,7 +61,13 @@ function script.update(dt)
 end
 
 function script.drawUI(dt)
-  if not visible() or (flashTimer <= 0 and testTimer <= 0) then return end
+  if not visible() then return end
+  
+  local car = ac.getCar(0)
+  local inPits = car ~= nil and (car.inPits or false)
+  if inPits and not store.showInPits then return end
+  
+  if flashTimer <= 0 and testTimer <= 0 then return end
 
   local screenSize = vec2(sim.windowWidth, sim.windowHeight)
   local p1 = vec2(screenSize.x * store.tlx, screenSize.y * store.tly)
@@ -131,11 +139,18 @@ local function settingsWindow()
   if dChanged then store.duration = d end
 
   ui.separator()
+  ui.text('Pits')
+  if ui.checkbox('Show in pits', store.showInPits) then
+    store.showInPits = not store.showInPits
+  end
+
+  ui.separator()
   if ui.button('Test flash') then testTimer = 1.5 end
   ui.sameLine()
   if ui.button('Reset') then
     store.tlx, store.tly, store.brx, store.bry = 0, 0, 1, 1
     store.opacity, store.duration = cfg.opacity, cfg.durationSeconds
+    store.showInPits = cfg.showInPits
   end
 
   ui.textWrapped('/ui hides every plugin UI, /ui collisionflash only this one.')

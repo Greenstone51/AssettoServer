@@ -12,4 +12,7 @@ public class CollisionFlashConfiguration : IValidateConfiguration<CollisionFlash
 
     [YamlMember(Description = "Default opacity of the red block, 0.0 (invisible) to 1.0 (solid red). Players can change this in their own in-game UI")]
     public float Opacity { get; init; } = 0.7f;
+
+    [YamlMember(Description = "Whether the red block indicator should be visible when the car is in the pits. Players can change this in their own in-game UI")]
+    public bool ShowInPits { get; init; } = true;
 }
