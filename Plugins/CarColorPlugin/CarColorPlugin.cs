@@ -1,168 +1,101 @@
+using System.Drawing;
 using AssettoServer.Network.ClientMessages;
+using AssettoServer.Network.Tcp;
 using AssettoServer.Server;
-using AssettoServer.Shared.Network.Packets.Outgoing;
-using CSP;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
+using Serilog;
 
 namespace CarColorPlugin;
 
-public class CarColorPlugin : BackgroundService, IHostedService
+public class CarColorPlugin : IHostedService
 {
-    private readonly ILogger<CarColorPlugin> _logger;
-    private readonly CSPServerScriptProvider _scriptProvider;
-    private readonly IOnlineEventManager _onlineEventManager;
     private readonly CarColorConfiguration _config;
-    private readonly Dictionary<ulong, ColorData> _playerColors = new();
-    private readonly Dictionary<ulong, DateTime> _lastColorChange = new();
+    private readonly EntryCarManager _entryCarManager;
+    private readonly object _lock = new();
+    private readonly Dictionary<byte, Color> _playerColors = new();
+    private readonly Dictionary<byte, DateTime> _lastColorChange = new();
 
-    public CarColorPlugin(
-        ILogger<CarColorPlugin> logger,
-        CSPServerScriptProvider scriptProvider,
-        IOnlineEventManager onlineEventManager,
-        IHostApplicationLifetime lifetime,
-        CarColorConfiguration config)
+    public CarColorPlugin(CarColorConfiguration config,
+        EntryCarManager entryCarManager,
+        CSPClientMessageTypeManager cspClientMessageTypeManager)
     {
-        _logger = logger;
-        _scriptProvider = scriptProvider;
-        _onlineEventManager = onlineEventManager;
         _config = config;
-        Lifetime = lifetime;
+        _entryCarManager = entryCarManager;
+
+        cspClientMessageTypeManager.RegisterOnlineEvent<CarColorChangePacket>(OnColorChangeReceived);
+        _entryCarManager.ClientConnected += OnClientConnected;
+        _entryCarManager.ClientDisconnected += OnClientDisconnected;
     }
 
-    public IHostApplicationLifetime Lifetime { get; }
-
-    public override async Task StartAsync(CancellationToken cancellationToken)
+    private void OnClientConnected(ACTcpClient sender, EventArgs args)
     {
-        _logger.LogInformation("CarColorPlugin starting");
-
-        // Register client message handler
-        _onlineEventManager.RegisterHandler<CarColorChangePacket>(OnColorChangeReceived);
-
-        // Send initial colors to all connected players
-        BroadcastCurrentColors();
-
-        await base.StartAsync(cancellationToken);
+        sender.FirstUpdateSent += OnFirstUpdateSent;
     }
 
-    public override async Task StopAsync(CancellationToken cancellationToken)
+    private void OnFirstUpdateSent(ACTcpClient sender, EventArgs args)
     {
-        _logger.LogInformation("CarColorPlugin stopping");
-        await base.StopAsync(cancellationToken);
-    }
-
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        while (!stoppingToken.IsCancellationRequested)
+        List<KeyValuePair<byte, Color>> colors;
+        lock (_lock)
         {
-            await Task.Delay(1000, stoppingToken);
+            colors = _playerColors.ToList();
+        }
+
+        foreach (var (sessionId, color) in colors)
+        {
+            if (sessionId == sender.SessionId) continue;
+            sender.SendPacket(new CarColorUpdatePacket { SessionId = sessionId, Color = color });
         }
     }
 
-    private void OnColorChangeReceived(CarColorChangePacket packet, ACTcpClient client)
+    private void OnClientDisconnected(ACTcpClient sender, EventArgs args)
     {
-        var guid = client.Guid;
-
-        // Rate limiting
-        if (_lastColorChange.TryGetValue(guid, out var lastChange))
+        lock (_lock)
         {
-            var elapsed = DateTime.UtcNow - lastChange;
-            if (elapsed.TotalSeconds < _config.ChangeCooldownSeconds)
+            _playerColors.Remove(sender.SessionId);
+            _lastColorChange.Remove(sender.SessionId);
+        }
+    }
+
+    private void OnColorChangeReceived(ACTcpClient client, CarColorChangePacket packet)
+    {
+        var now = DateTime.UtcNow;
+
+        lock (_lock)
+        {
+            if (_lastColorChange.TryGetValue(client.SessionId, out var lastChange)
+                && (now - lastChange).TotalSeconds < _config.ChangeCooldownSeconds)
             {
-                _logger.LogWarning($"Player {guid} tried to change color too quickly");
                 return;
             }
+
+            _lastColorChange[client.SessionId] = now;
+            _playerColors[client.SessionId] = packet.Color;
         }
 
-        _lastColorChange[guid] = DateTime.UtcNow;
-        _playerColors[guid] = packet.Color;
+        Log.Information("{ClientName} ({SessionId}) changed car color to {Color}", client.Name, client.SessionId, packet.Color);
 
-        _logger.LogInformation($"Player {guid} changed color to {packet.Color}");
-
-        // Broadcast to all other clients
-        BroadcastColorToOthers(guid, packet.Color);
-    }
-
-    private void BroadcastColorToOthers(ulong senderGuid, ColorData color)
-    {
-        var packet = new CarColorUpdatePacket
+        _entryCarManager.BroadcastPacket(new CarColorUpdatePacket
         {
-            SenderGuid = senderGuid,
-            Color = color
-        };
-
-        _onlineEventManager.Broadcast(packet);
+            SessionId = client.SessionId,
+            Color = packet.Color
+        }, client);
     }
 
-    private void BroadcastCurrentColors()
-    {
-        foreach (var kvp in _playerColors)
-        {
-            BroadcastColorToOthers(kvp.Key, kvp.Value);
-        }
-    }
+    public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
-    public void OnClientConnected(ACTcpClient client)
-    {
-        // Send stored color if available
-        if (_playerColors.TryGetValue(client.Guid, out var color))
-        {
-            BroadcastColorToOthers(client.Guid, color);
-        }
-    }
-
-    public void OnClientDisconnected(ACTcpClient client)
-    {
-        _playerColors.Remove(client.Guid);
-        _lastColorChange.Remove(client.Guid);
-    }
+    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }
-
-public record ColorData(byte R, byte G, byte B);
 
 [OnlineEvent(Key = "AS_CarColor")]
 public class CarColorChangePacket : OnlineEvent<CarColorChangePacket>
 {
-    public ColorData Color { get; set; }
-
-    public override void FromReader(PacketReader reader)
-    {
-        Color = new ColorData(
-            reader.ReadByte(),
-            reader.ReadByte(),
-            reader.ReadByte()
-        );
-    }
-
-    public override void ToWriter(ref PacketWriter writer)
-    {
-        writer.Write(Color.R);
-        writer.Write(Color.G);
-        writer.Write(Color.B);
-    }
+    [OnlineEventField(Name = "color")]
+    public Color Color;
 }
 
 [OnlineEvent(Key = "AS_CarColorUpdate")]
 public class CarColorUpdatePacket : OnlineEvent<CarColorUpdatePacket>
 {
-    public ulong SenderGuid { get; set; }
-    public ColorData Color { get; set; }
-
-    public override void FromReader(PacketReader reader)
-    {
-        SenderGuid = reader.ReadUInt64();
-        Color = new ColorData(
-            reader.ReadByte(),
-            reader.ReadByte(),
-            reader.ReadByte()
-        );
-    }
-
-    public override void ToWriter(ref PacketWriter writer)
-    {
-        writer.Write(SenderGuid);
-        writer.Write(Color.R);
-        writer.Write(Color.G);
-        writer.Write(Color.B);
-    }
+    [OnlineEventField(Name = "color")]
+    public Color Color;
 }
