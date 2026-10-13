@@ -34,6 +34,14 @@ local function hexToRgbm(hex)
     return rgbm(r / 255, g / 255, b / 255, 1)
 end
 
+local function to255(v)
+    return math.max(0, math.min(255, math.floor(v * 255 + 0.5)))
+end
+
+local function colorToHex(c)
+    return string.format('%02X%02X%02X', to255(c.r), to255(c.g), to255(c.b))
+end
+
 local function splitList(s)
     local out = {}
     for item in tostring(s or ''):gmatch('[^,]+') do
@@ -186,6 +194,115 @@ local function applyOwn()
     applyToCar(0, ownRenderState())
 end
 
+-- ---------- draft (what the picker is currently editing) ----------
+
+local draft = {
+    body = '',
+    caliper = 'FF0000',
+    useCaliper = false,
+    finishSet = false,
+    metallic = 0.5,
+    roughness = 0.5,
+}
+local target = 'body' -- 'body' or 'caliper'
+local wheelColor = rgbm(1, 1, 1, 1)
+local hexInput = ''
+local removeMode = false
+local previewDirty = false
+local lastPreviewAt = -1000
+
+local function loadDraft()
+    draft.body = normHex(store.body) or ''
+    draft.caliper = normHex(store.caliper) or 'FF0000'
+    draft.useCaliper = store.useCaliper
+    draft.finishSet = store.finishSet
+    draft.metallic = store.metallic
+    draft.roughness = store.roughness
+end
+
+local function draftRenderState()
+    local st = {}
+    if draft.body ~= '' then
+        st.body = hexToRgbm(draft.body)
+        if draft.finishSet then
+            st.metallic = draft.metallic
+            st.roughness = draft.roughness
+        end
+    end
+    if draft.useCaliper then
+        st.caliper = hexToRgbm(draft.caliper)
+    end
+    return st
+end
+
+local function currentHex()
+    if target == 'body' then
+        return draft.body ~= '' and draft.body or 'FFFFFF'
+    end
+    return draft.caliper
+end
+
+local function syncPickerFromDraft()
+    local hex = currentHex()
+    wheelColor = hexToRgbm(hex)
+    hexInput = '#' .. hex
+end
+
+-- source: 'wheel' keeps the wheel untouched, 'typing' keeps the text box untouched, nil refreshes both
+local function setDraftColor(hex, source)
+    hex = normHex(hex)
+    if not hex then return end
+
+    if target == 'body' then
+        draft.body = hex
+    else
+        draft.caliper = hex
+        draft.useCaliper = true
+    end
+
+    if source ~= 'wheel' then wheelColor = hexToRgbm(hex) end
+    if source ~= 'typing' then hexInput = '#' .. hex end
+    previewDirty = true
+end
+
+local function setTarget(newTarget)
+    target = newTarget
+    syncPickerFromDraft()
+end
+
+local function applyDraft()
+    store.body = draft.body
+    if draft.body ~= '' then pushHistory(draft.body) end
+    store.caliper = draft.caliper
+    store.useCaliper = draft.useCaliper
+    store.finishSet = draft.finishSet and draft.body ~= ''
+    store.metallic = draft.metallic
+    store.roughness = draft.roughness
+    previewDirty = false
+    applyOwn()
+    return true
+end
+
+local function cancelDraft()
+    loadDraft()
+    syncPickerFromDraft()
+    previewDirty = false
+    applyOwn()
+end
+
+local function resetAll()
+    store.body = ''
+    store.useCaliper = false
+    store.finishSet = false
+    previewDirty = false
+    loadDraft()
+    syncPickerFromDraft()
+    applyOwn()
+end
+
+loadDraft()
+syncPickerFromDraft()
+
 -- ---------- networking ----------
 
 -- Client -> server. Field names/types must match CarColorChangePacket in CarColorPlugin.cs.
@@ -243,8 +360,18 @@ local function sendState()
     })
 end
 
--- Throttled so the server-side cooldown does not drop changes (e.g. while dragging sliders).
+-- Throttled so the server-side cooldown does not drop changes.
+-- Also throttles the live local preview while dragging the wheel.
 function script.update(dt)
+    if previewDirty then
+        local now = os.clock()
+        if now - lastPreviewAt >= 0.1 then
+            previewDirty = false
+            lastPreviewAt = now
+            applyToCar(0, draftRenderState())
+        end
+    end
+
     if pendingSendAt ~= nil then
         local now = os.clock()
         if now >= pendingSendAt and now - lastSentAt >= cooldown + 0.25 then
@@ -255,53 +382,26 @@ function script.update(dt)
     end
 end
 
--- ---------- actions ----------
-
-local function setBody(hex)
-    hex = normHex(hex)
-    if not hex then return end
-    store.body = hex
-    pushHistory(hex)
-    applyOwn()
-    queueSend(0)
-end
-
-local function setCaliper(hex)
-    hex = normHex(hex)
-    if not hex then return end
-    store.caliper = hex
-    store.useCaliper = true
-    applyOwn()
-    queueSend(0)
-end
-
-local function setFinish(metallic, roughness, delay)
-    store.metallic = metallic
-    store.roughness = roughness
-    store.finishSet = true
-    applyOwn()
-    queueSend(delay or 0)
-end
-
-local function resetAll()
-    store.body = ''
-    store.useCaliper = false
-    store.finishSet = false
-    applyOwn()
-    queueSend(0)
-end
-
 -- ---------- UI ----------
 
-local hexInput = ''
-local removeMode = false
+-- ASSUMED: ui.colorPicker and ui.ColorPickerFlags.* exist in CSP 4130. Missing flags are skipped,
+-- and a missing ui.colorPicker falls back to RGB sliders.
+local wheelFlags = 0
+pcall(function()
+    local flags = ui.ColorPickerFlags
+    if flags then
+        for _, name in ipairs({ 'PickerHueWheel', 'NoAlpha', 'NoInputs', 'NoSidePreview', 'NoLabel', 'NoSmallPreview' }) do
+            if flags[name] then wheelFlags = bit.bor(wheelFlags, flags[name]) end
+        end
+    end
+end)
 
-local function swatch(id, hex, size)
+local function swatch(id, hex, w, h)
     local c = hexToRgbm(hex)
     ui.pushStyleColor(ui.StyleColor.Button, c)
     ui.pushStyleColor(ui.StyleColor.ButtonHovered, c)
     ui.pushStyleColor(ui.StyleColor.ButtonActive, c)
-    local clicked = ui.button('##cc_' .. id, vec2(size, size))
+    local clicked = ui.button('##cc_' .. id, vec2(w, h or w))
     ui.popStyleColor(3)
     if ui.itemHovered() then ui.setTooltip('#' .. hex) end
     return clicked
@@ -317,79 +417,205 @@ local function swatchRow(prefix, list)
     return clicked
 end
 
-local function window()
-    ui.pushFont(ui.Font.Title)
-    ui.text('CAR COLOR')
-    ui.popFont()
-    ui.separator()
+local function coloredButton(label, size, color)
+    ui.pushStyleColor(ui.StyleColor.Button, color)
+    ui.pushStyleColor(ui.StyleColor.ButtonHovered, rgbm(math.min(1, color.r + 0.12), math.min(1, color.g + 0.12), math.min(1, color.b + 0.12), 1))
+    ui.pushStyleColor(ui.StyleColor.ButtonActive, rgbm(math.min(1, color.r + 0.2), math.min(1, color.g + 0.2), math.min(1, color.b + 0.2), 1))
+    local clicked = ui.button(label, size)
+    ui.popStyleColor(3)
+    return clicked
+end
 
-    -- Body color
-    ui.text('Body color')
-    local picked = swatchRow('p', presets)
-    if picked then setBody(picked) end
+local function drawPreviewStrip()
+    local avail = ui.availableSpaceX()
+    local half = (avail - 6) / 2
 
-    ui.text('Custom hex (e.g. FF8800)')
-    hexInput = ui.inputText('##cc_hex', hexInput)
-    if ui.button('Set body') then setBody(hexInput) end
-    ui.sameLine()
-    if ui.button('Set caliper') then setCaliper(hexInput) end
+    ui.text('Body')
+    ui.sameLine(half + 6)
+    ui.text('Calipers')
 
-    -- Finish
-    ui.separator()
-    ui.text('Finish')
-    if not normHex(store.body) then
-        ui.textWrapped('Pick a body color first to change the finish.')
+    if draft.body ~= '' then
+        swatch('pv_body', draft.body, half, 34)
     else
-        if ui.button('Matte') then setFinish(0.0, 1.0) end
-        ui.sameLine()
-        if ui.button('Gloss') then setFinish(0.3, 0.0) end
-        ui.sameLine()
-        if ui.button('Metallic') then setFinish(1.0, 0.2) end
+        ui.button('Stock paint##cc_pv_body', vec2(half, 34))
+    end
+    ui.sameLine(0, 6)
+    if draft.useCaliper then
+        swatch('pv_cal', draft.caliper, half, 34)
+    else
+        ui.button('Stock##cc_pv_cal', vec2(half, 34))
+    end
+end
 
-        local m, mChanged = ui.slider('##cc_metal', store.metallic * 100, 0, 100, 'Metallic: %.0f%%')
-        if mChanged then setFinish(m / 100, store.roughness, 0.4) end
-        local r, rChanged = ui.slider('##cc_rough', store.roughness * 100, 0, 100, 'Roughness: %.0f%%')
-        if rChanged then setFinish(store.metallic, r / 100, 0.4) end
+local function drawTargetCombo()
+    ui.setNextItemWidth(ui.availableSpaceX())
+    local label = target == 'body' and 'Car paint' or 'Calipers'
+    if ui.beginCombo('##cc_target', label) then
+        if ui.selectable('Car paint', target == 'body') then setTarget('body') end
+        if ui.selectable('Calipers', target == 'caliper') then setTarget('caliper') end
+        ui.endCombo()
+    end
+end
 
-        if not finishSupported then
-            ui.textWrapped('Finish is not supported by this CSP build; only the color is applied.')
+local function drawWheel()
+    if ui.colorPicker ~= nil then
+        ui.setNextItemWidth(ui.availableSpaceX())
+        local before = colorToHex(wheelColor)
+        local ok, res = pcall(ui.colorPicker, '##cc_wheel', wheelColor, wheelFlags)
+        if ok and res ~= nil and type(res) ~= 'boolean' and type(res) ~= 'number' then
+            wheelColor = res
+        end
+        if ok then
+            local after = colorToHex(wheelColor)
+            if after ~= before then setDraftColor(after, 'wheel') end
+            return
         end
     end
 
-    -- Caliper
+    -- Fallback: plain RGB sliders
+    local r, rChanged = ui.slider('##cc_fr', wheelColor.r * 255, 0, 255, 'R: %.0f')
+    local g, gChanged = ui.slider('##cc_fg', wheelColor.g * 255, 0, 255, 'G: %.0f')
+    local b, bChanged = ui.slider('##cc_fb', wheelColor.b * 255, 0, 255, 'B: %.0f')
+    if rChanged or gChanged or bChanged then
+        wheelColor = rgbm(r / 255, g / 255, b / 255, 1)
+        setDraftColor(colorToHex(wheelColor), 'wheel')
+    end
+end
+
+local function drawRgbRow()
+    local hex = currentHex()
+    local c = hexToRgbm(hex)
+    local avail = ui.availableSpaceX()
+    local boxW = (avail - 32 - 12) / 3
+    local disabled = ui.ButtonFlags.Disabled
+    ui.button('R: ' .. to255(c.r) .. '##cc_r', vec2(boxW, 26), disabled)
+    ui.sameLine(0, 4)
+    ui.button('G: ' .. to255(c.g) .. '##cc_g', vec2(boxW, 26), disabled)
+    ui.sameLine(0, 4)
+    ui.button('B: ' .. to255(c.b) .. '##cc_b', vec2(boxW, 26), disabled)
+    ui.sameLine(0, 4)
+    swatch('rgb_sw', hex, 28, 26)
+end
+
+local function drawHexRow()
+    local avail = ui.availableSpaceX()
+    ui.setNextItemWidth(avail - 32)
+    local text = ui.inputText('##cc_hex', hexInput)
+    if text ~= nil and text ~= hexInput then
+        hexInput = text
+        local n = normHex(text)
+        if n then setDraftColor(n, 'typing') end
+    end
+    ui.sameLine(0, 4)
+    swatch('hex_sw', currentHex(), 28, 26)
+end
+
+local function drawFinish()
+    if draft.body == '' then
+        ui.textWrapped('Pick a body color first to change the finish.')
+        return
+    end
+
+    local function setFinish(metallic, roughness)
+        draft.metallic = metallic
+        draft.roughness = roughness
+        draft.finishSet = true
+        previewDirty = true
+    end
+
+    if ui.button('Matte') then setFinish(0.0, 1.0) end
+    ui.sameLine()
+    if ui.button('Gloss') then setFinish(0.3, 0.0) end
+    ui.sameLine()
+    if ui.button('Metallic') then setFinish(1.0, 0.2) end
+
+    local m, mChanged = ui.slider('##cc_metal', draft.metallic * 100, 0, 100, 'Metallic: %.0f%%')
+    if mChanged then setFinish(m / 100, draft.roughness) end
+    local r, rChanged = ui.slider('##cc_rough', draft.roughness * 100, 0, 100, 'Roughness: %.0f%%')
+    if rChanged then setFinish(draft.metallic, r / 100) end
+
+    if draft.finishSet and ui.button('Clear finish') then
+        draft.finishSet = false
+        previewDirty = true
+    end
+
+    if not finishSupported then
+        ui.textWrapped('Finish is not supported by this CSP build; only the color is applied.')
+    end
+end
+
+local function window()
+    ui.pushFont(ui.Font.Title)
+    ui.text('Pick a new color')
+    ui.popFont()
     ui.separator()
-    ui.text('Caliper color')
-    local caliperPicked = swatchRow('c', presets)
-    if caliperPicked then setCaliper(caliperPicked) end
-    if ui.checkbox('Paint calipers', store.useCaliper) then
-        store.useCaliper = not store.useCaliper
-        applyOwn()
+
+    drawPreviewStrip()
+    ui.offsetCursorY(6)
+
+    drawTargetCombo()
+    if target == 'caliper' then
+        if ui.checkbox('Paint calipers', draft.useCaliper) then
+            draft.useCaliper = not draft.useCaliper
+            previewDirty = true
+        end
+    end
+    ui.offsetCursorY(4)
+
+    drawWheel()
+    ui.offsetCursorY(4)
+
+    drawRgbRow()
+    drawHexRow()
+
+    if ui.button('Randomize', vec2(ui.availableSpaceX(), 26)) then
+        setDraftColor(string.format('%02X%02X%02X', math.random(0, 255), math.random(0, 255), math.random(0, 255)))
+    end
+
+    ui.offsetCursorY(4)
+    ui.text('Presets')
+    local presetPicked = swatchRow('p', presets)
+    if presetPicked then setDraftColor(presetPicked) end
+
+    if target == 'body' then
+        ui.treeNode('Finish', nil, drawFinish)
+    end
+
+    ui.treeNode('Favourites (' .. #favourites .. '/' .. maxFavourites .. ')', nil, function()
+        if ui.button('Add current color') then addFavourite(currentHex()) end
+        if ui.checkbox('Click a favourite to remove it', removeMode) then removeMode = not removeMode end
+        local favPicked = swatchRow('f', favourites)
+        if favPicked then
+            if removeMode then removeFavourite(favPicked) else setDraftColor(favPicked) end
+        end
+    end)
+
+    ui.treeNode('History', nil, function()
+        local histPicked = swatchRow('h', history)
+        if histPicked then setDraftColor(histPicked) end
+        if #history > 0 and ui.button('Clear history') then
+            history = {}
+            saveLists()
+        end
+    end)
+
+    ui.separator()
+    local avail = ui.availableSpaceX()
+    local bw = (avail - 8) / 3
+    local size = vec2(bw, 30)
+
+    if coloredButton('Apply', size, rgbm(0.15, 0.5, 0.2, 1)) then
+        if applyDraft() then queueSend(0) end
+    end
+    ui.sameLine(0, 4)
+    if coloredButton('Reset', size, rgbm(0.25, 0.3, 0.35, 1)) then
+        resetAll()
         queueSend(0)
     end
-
-    -- Favourites
-    ui.separator()
-    ui.text('Favourites (' .. #favourites .. '/' .. maxFavourites .. ')')
-    local body = normHex(store.body)
-    if body and ui.button('Add current color') then addFavourite(body) end
-    if ui.checkbox('Click a favourite to remove it', removeMode) then removeMode = not removeMode end
-    local favPicked = swatchRow('f', favourites)
-    if favPicked then
-        if removeMode then removeFavourite(favPicked) else setBody(favPicked) end
+    ui.sameLine(0, 4)
+    if coloredButton('Cancel', size, rgbm(0.55, 0.15, 0.15, 1)) then
+        cancelDraft()
     end
-
-    -- History
-    ui.separator()
-    ui.text('History')
-    local histPicked = swatchRow('h', history)
-    if histPicked then setBody(histPicked) end
-    if #history > 0 and ui.button('Clear history') then
-        history = {}
-        saveLists()
-    end
-
-    ui.separator()
-    if ui.button('Reset to stock') then resetAll() end
 end
 
 ui.registerOnlineExtra(ui.Icons.SettingsAlt, 'Car Color', function() return true end, window, nil, ui.OnlineExtraFlags.Tool)
