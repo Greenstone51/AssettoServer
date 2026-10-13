@@ -6,7 +6,7 @@ local PLUGIN_ID = 'collisionflash'
 local cfg = ac.configValues({
   durationSeconds = 0.35,
   opacity = 0.7,
-  showInPits = true,
+  showInPits = false,
 })
 
 -- Per-player settings, saved on the player's PC
@@ -17,7 +17,6 @@ local store = ac.storage({
   showInPits = cfg.showInPits,
 })
 
-local sim = ac.getSim()
 local flashTimer = 0
 local testTimer = 0
 local allOn = true   -- toggled by "/ui"
@@ -60,16 +59,29 @@ function script.update(dt)
   if testTimer > 0 then testTimer = testTimer - dt end
 end
 
+local function isInPits(car)
+  if car == nil then return false end
+  -- CSP exposes isInPit (pit box) and isInPitlane; "inPits" does not exist and was always nil
+  return (car.isInPit or car.isInPitlane or false) == true
+end
+
 function script.drawUI(dt)
   if not visible() then return end
-  
-  local car = ac.getCar(0)
-  local inPits = car ~= nil and (car.inPits or false)
-  if inPits and not store.showInPits then return end
-  
-  if flashTimer <= 0 and testTimer <= 0 then return end
 
-  local screenSize = vec2(sim.windowWidth, sim.windowHeight)
+  local car = ac.getCar(0)
+  local inPits = isInPits(car)
+
+  -- In the pits the block stays on permanently when enabled, and never flashes when disabled
+  local show
+  if inPits then
+    show = store.showInPits
+  else
+    show = flashTimer > 0
+  end
+  if testTimer > 0 then show = true end
+  if not show then return end
+
+  local screenSize = ac.getUI().windowSize
   local p1 = vec2(screenSize.x * store.tlx, screenSize.y * store.tly)
   local p2 = vec2(screenSize.x * store.brx, screenSize.y * store.bry)
 
