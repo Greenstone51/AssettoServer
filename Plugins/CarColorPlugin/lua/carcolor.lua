@@ -561,26 +561,6 @@ local function drawCarPreview()
     return true
 end
 
-    -- Click-and-hold + move to rotate (ASSUMED: ui.mouseDown / ui.mouseDelta exist)
-    pcall(function()
-        if ui.itemHovered() and ui.mouseClicked(ui.MouseButton.Left) then
-            preview.dragging = true
-        end
-        if preview.dragging then
-            if ui.mouseDown(ui.MouseButton.Left) then
-                local d = ui.mouseDelta()
-                preview.yaw = preview.yaw - d.x * 0.01
-                preview.pitch = math.max(-0.1, math.min(0.8, preview.pitch + d.y * 0.005))
-            else
-                preview.dragging = false
-            end
-        end
-    end)
-
-    if ui.itemHovered() then ui.setTooltip('Hold left mouse button and move to rotate') end
-    return true
-end
-
 local function drawPreviewStrip()
     local avail = ui.availableSpaceX()
     local half = (avail - 6) / 2
