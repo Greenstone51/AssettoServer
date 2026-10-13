@@ -440,11 +440,11 @@ local preview = {
     zoom = 1.0,
     shadings = {},
     shadingIndex = 1,
-    brightness = 0.5,
+    brightness = 0.2, -- ambient level for the shot, adjustable with the "Preview ambient" slider
 }
 
 -- Order matters: the first entry that exists is the default. Main keeps the car's own shaders
--- (lights/emissives, opaque paint); Simplified/Simplest are fallbacks that may drop lights or alpha materials.
+-- (lights/emissives, opaque paint); Simplified/Simplest are fallbacks that drop lights or alpha materials.
 local shadingCandidates = { 'Main', 'Default', 'Original', 'Simplified', 'Simplest' }
 
 local function collectShadings()
@@ -511,9 +511,9 @@ local function ensurePreviewShot()
     return preview.shot
 end
 
--- FALLBACK (no-op): no API for forcing lights on inside a GeometryShot could be confirmed for CSP 4130,
--- so nothing is forced. Under the Main shading the shot renders the live car node, which normally
--- carries the real car's light state. If lights are still dark, try the other shading entries.
+-- FALLBACK (no-op): no API for forcing lights on or boosting them inside a GeometryShot could be confirmed
+-- for CSP 4130, so nothing is forced. Under the Main shading the shot renders the live car node, which
+-- carries the real car's light state (brake lights are visible but dim).
 local function mirrorCarLights(car)
     -- intentionally empty
 end
@@ -752,6 +752,15 @@ end
         if ui.button('Preview shading: ' .. entry.name .. '##cc_shading', vec2(ui.availableSpaceX(), 22)) then
             preview.shadingIndex = preview.shadingIndex % #preview.shadings + 1
             applyShading()
+        end
+    end
+
+    if preview.shot then
+        ui.setNextItemWidth(ui.availableSpaceX())
+        local b, bChanged = ui.slider('##cc_ambient', preview.brightness * 100, 0, 100, 'Preview ambient: %.0f%%')
+        if bChanged then
+            preview.brightness = b / 100
+            applyAmbient()
         end
     end
     ui.offsetCursorY(6)
