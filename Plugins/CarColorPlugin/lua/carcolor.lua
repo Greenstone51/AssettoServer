@@ -436,7 +436,8 @@ local preview = {
     yaw = math.rad(35),
     pitch = math.rad(12),
     dragging = false,
-    size = vec2(512, 256),
+    size = vec2(1024, 768), -- render resolution; the on-screen shape is 4:3
+    zoom = 1.0,             -- 1 = default distance, smaller = closer
 }
 
 local function ensurePreviewShot()
@@ -484,7 +485,7 @@ local function drawCarPreview()
     pcall(function()
         if car.aabbSize and car.aabbSize.z > 1 then length = car.aabbSize.z end
     end)
-    local dist = length * 1.55
+    local dist = length * 1.55 * preview.zoom
 
     local a = heading + preview.yaw
     local horizontal = math.cos(preview.pitch) * dist
@@ -495,16 +496,70 @@ local function drawCarPreview()
         target.z + math.cos(a) * horizontal)
     local look = (target - camPos):normalize()
 
+    local width = ui.availableSpaceX()
+    local height = width * preview.size.y / preview.size.x
+
     local drawn = pcall(function()
         shot:update(camPos, look, vec3(0, 1, 0), 40)
-        local width = ui.availableSpaceX()
-        ui.image(shot, vec2(width, width * preview.size.y / preview.size.x))
+
+        -- Draw the image, then move the cursor back so the hit area sits exactly on top of it.
+        local start = nil
+        if ui.getCursor and ui.setCursor then start = ui.getCursor():clone() end
+        ui.image(shot, vec2(width, height))
+        if start then
+            ui.setCursor(start)
+        else
+            ui.offsetCursorY(-(height + 4)) -- approximate item spacing
+        end
     end)
     if not drawn then
         preview.failed = true
         preview.shot = nil
         return false
     end
+
+    -- Invisible hit area over the image. Because it is a real item, dragging on it no longer moves the window.
+    pcall(function()
+        if ui.invisibleButton then
+            ui.invisibleButton('##cc_prev_hit', vec2(width, height))
+        else
+            local clear = rgbm(0, 0, 0, 0)
+            ui.pushStyleColor(ui.StyleColor.Button, clear)
+            ui.pushStyleColor(ui.StyleColor.ButtonHovered, clear)
+            ui.pushStyleColor(ui.StyleColor.ButtonActive, clear)
+            ui.button('##cc_prev_hit', vec2(width, height))
+            ui.popStyleColor(3)
+        end
+    end)
+    local hovered = ui.itemHovered() -- must directly follow the hit area item
+
+    pcall(function()
+        -- Click-and-hold + move to rotate (ASSUMED: ui.mouseDown / ui.mouseDelta exist)
+        if hovered and ui.mouseClicked(ui.MouseButton.Left) then
+            preview.dragging = true
+        end
+        if preview.dragging then
+            if ui.mouseDown(ui.MouseButton.Left) then
+                local d = ui.mouseDelta()
+                preview.yaw = preview.yaw - d.x * 0.01
+                preview.pitch = math.max(-0.1, math.min(0.8, preview.pitch + d.y * 0.005))
+            else
+                preview.dragging = false
+            end
+        end
+
+        -- Scroll wheel zoom: scroll up = closer
+        if hovered then
+            local mw = ui.mouseWheel()
+            if mw ~= 0 then
+                preview.zoom = math.max(0.3, math.min(2.0, preview.zoom * (1 - mw * 0.1)))
+            end
+        end
+    end)
+
+    if hovered then ui.setTooltip('Hold left mouse button and move to rotate, scroll to zoom') end
+    return true
+end
 
     -- Click-and-hold + move to rotate (ASSUMED: ui.mouseDown / ui.mouseDelta exist)
     pcall(function()
