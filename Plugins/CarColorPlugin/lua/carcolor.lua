@@ -436,17 +436,18 @@ local preview = {
     yaw = math.rad(35),
     pitch = math.rad(12),
     dragging = false,
-    size = vec2(1024, 1024), -- square: the window is narrow, so this makes the preview taller
-    zoom = 0.8,              -- 1 = default distance, smaller = closer
-    shadings = {},           -- shader types that exist in this CSP build
+    size = vec2(1280, 960), -- 4:3, rendered large then scaled down for smoother edges
+    zoom = 1.0,
+    shadings = {},
     shadingIndex = 1,
+    brightness = 0.5,
 }
 
 local function collectShadings()
     local list = {}
     local types = render and render.ShadersType
     if types then
-        for _, name in ipairs({ 'Main', 'Default', 'Original', 'Simplified', 'Simplest' }) do
+        for _, name in ipairs({ 'Simplified', 'Simplest', 'Main', 'Default', 'Original' }) do
             if types[name] ~= nil then list[#list + 1] = { name = name, value = types[name] } end
         end
     end
@@ -461,6 +462,12 @@ local function applyShading()
     end
 end
 
+local function applyAmbient()
+    if not preview.shot then return end
+    local b = preview.brightness
+    pcall(function() preview.shot:setAmbientColor(rgbm(b, b, b, 1)) end)
+end
+
 local function ensurePreviewShot()
     if preview.shot or preview.failed then return preview.shot end
 
@@ -468,7 +475,6 @@ local function ensurePreviewShot()
         local s = ac.GeometryShot(ac.findNodes('carRoot:0'), preview.size, 1, false)
         s:setClippingPlanes(0.1, 200)
         -- Calmer ambient light to reduce washed-out highlights (setAmbientColor is used on GeometryShot in FastTravelPlugin)
-        pcall(function() s:setAmbientColor(rgbm(0.5, 0.5, 0.5, 1)) end)
         return s
     end)
 
@@ -698,11 +704,17 @@ local function drawFinish()
     end
 end
 
+local widthRequested = false  -- put this above window(), at file level
+
 local function window()
-    ui.pushFont(ui.Font.Title)
-    ui.text('Pick a new color')
-    ui.popFont()
-    ui.separator()
+if not widthRequested then
+    widthRequested = true
+    pcall(function()
+        if ui.setWindowSize and ui.Cond and ui.Cond.FirstUseEver then
+            ui.setWindowSize(vec2(520, 0), ui.Cond.FirstUseEver)
+        end
+    end)
+end
     
     if not drawCarPreview() then drawPreviewStrip() end
     if #preview.shadings > 1 then
