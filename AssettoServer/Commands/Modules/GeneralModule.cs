@@ -8,6 +8,7 @@ using AssettoServer.Server.Configuration;
 using AssettoServer.Server.Weather;
 using AssettoServer.Utils;
 using JetBrains.Annotations;
+using AssettoServer.Network.ClientMessages;
 
 namespace AssettoServer.Commands.Modules;
 
@@ -78,5 +79,20 @@ public class GeneralModule : ACModuleBase
         }
         else
             Reply("Reset is not enabled on this server");
+    }
+
+    [Command("ui"), RequireConnectedPlayer]
+    public void ToggleUi([Remainder] string? target = null)
+    {
+        if (!_configuration.Extra.EnableClientMessages)
+        {
+            Reply("Client messages are disabled on this server.");
+            return;
+        }
+
+        var id = (target ?? "").Trim().ToLowerInvariant();
+        if (id.Length > 16) id = id[..16];
+
+        Client!.SendPacket(new ToggleUiPacket { Target = id });
     }
 }
