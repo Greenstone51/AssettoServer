@@ -15,7 +15,14 @@ local function hexToRgb(hex)
     if #hex == 3 then
         hex = hex:sub(1,1)..hex:sub(1,1)..hex:sub(2,2)..hex:sub(2,2)..hex:sub(3,3)..hex:sub(3,3)
     end
-    return tonumber("0x"..hex:sub(1,2)), tonumber("0x"..hex:sub(3,4)), tonumber("0x"..hex:5,6)
+    -- Ensure we have 6 characters
+    if #hex < 6 then
+        return 255, 255, 255
+    end
+    local r = tonumber("0x"..hex:sub(1,2)) or 255
+    local g = tonumber("0x"..hex:sub(3,4)) or 255
+    local b = tonumber("0x"..hex:sub(5,6)) or 255
+    return r, g, b
 end
 
 local function rgbToHex(r, g, b)
@@ -56,7 +63,9 @@ local function applyColorToCar(r, g, b)
     
     for _, node in ipairs(nodes) do
         local mesh = node:findMeshes()
-        if not mesh then continue end
+        if not mesh then
+            goto continue_node
+        end
         
         for _, material in ipairs(mesh) do
             local materialName = material.name:lower()
@@ -70,6 +79,7 @@ local function applyColorToCar(r, g, b)
                 end
             end
         end
+        ::continue_node::
     end
 end
 
