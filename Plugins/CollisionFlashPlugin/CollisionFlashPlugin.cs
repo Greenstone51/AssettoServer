@@ -6,9 +6,9 @@ using Microsoft.Extensions.Hosting;
 namespace CollisionFlashPlugin;
 
 /// <summary>
-/// Sends a small client-side Lua script to every player. The script itself detects
-/// collisions of the player's own car (other cars, barriers, walls) and draws the red block.
-/// The server only delivers the script and its settings.
+/// Sends a small client-side Lua script to every player. The script detects collisions of the
+/// player's own car and draws the red block. Box position and size are set by each player
+/// in their own in-game UI; the server only delivers the script and default values.
 /// </summary>
 public class CollisionFlashPlugin : IHostedService
 {
@@ -22,11 +22,7 @@ public class CollisionFlashPlugin : IHostedService
         scriptProvider.AddScript(script, "collisionflash.lua", new Dictionary<string, object>
         {
             ["durationSeconds"] = configuration.DurationSeconds.ToString(CultureInfo.InvariantCulture),
-            ["opacity"] = configuration.Opacity.ToString(CultureInfo.InvariantCulture),
-            ["topLeftX"] = configuration.TopLeftX.ToString(CultureInfo.InvariantCulture),
-            ["topLeftY"] = configuration.TopLeftY.ToString(CultureInfo.InvariantCulture),
-            ["bottomRightX"] = configuration.BottomRightX.ToString(CultureInfo.InvariantCulture),
-            ["bottomRightY"] = configuration.BottomRightY.ToString(CultureInfo.InvariantCulture)
+            ["opacity"] = configuration.Opacity.ToString(CultureInfo.InvariantCulture)
         });
     }
 
