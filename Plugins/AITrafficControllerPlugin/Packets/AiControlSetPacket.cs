@@ -2,36 +2,37 @@ using AssettoServer.Network.ClientMessages;
 
 namespace AITrafficControllerPlugin.Packets;
 
+// Client -> server. Field names/types must match the ac.OnlineEvent "AS_AiCtrlSet" in lua/aitrafficcontroller.lua.
 [OnlineEvent(Key = "AS_AiCtrlSet")]
 public class AiControlSetPacket : OnlineEvent<AiControlSetPacket>
 {
     [OnlineEventField(Name = "enabled")]
-    public bool? Enabled { get; set; }
+    public bool Enabled;
 
     [OnlineEventField(Name = "density")]
-    public float? Density { get; set; }
+    public float Density;
 
     [OnlineEventField(Name = "maxSpeedKph")]
-    public float? MaxSpeedKph { get; set; }
+    public float MaxSpeedKph;
 
     [OnlineEventField(Name = "playerRadius")]
-    public float? PlayerRadius { get; set; }
+    public float PlayerRadius;
 
     [OnlineEventField(Name = "perPlayer")]
-    public ushort? PerPlayer { get; set; }
+    public ushort PerPlayer;
 
     [OnlineEventField(Name = "maxCount")]
-    public ushort? MaxCount { get; set; }
+    public ushort MaxCount;
 
     [OnlineEventField(Name = "minSpawn")]
-    public ushort? MinSpawn { get; set; }
+    public ushort MinSpawn;
 
     [OnlineEventField(Name = "maxSpawn")]
-    public ushort? MaxSpawn { get; set; }
+    public ushort MaxSpawn;
 
     [OnlineEventField(Name = "minSafety")]
-    public ushort? MinSafety { get; set; }
+    public ushort MinSafety;
 
     [OnlineEventField(Name = "maxSafety")]
-    public ushort? MaxSafety { get; set; }
+    public ushort MaxSafety;
 }

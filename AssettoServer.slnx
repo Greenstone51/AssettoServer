@@ -4,6 +4,7 @@
   <Project Path="AssettoServer.Tests/AssettoServer.Tests.csproj" />
   <Project Path="FastLaneUtils/FastLaneUtils.csproj" />
   <Folder Name="/Plugins/">
+    <Project Path="Plugins/AITrafficControllerPlugin/AITrafficControllerPlugin.csproj" />
     <Project Path="Plugins/AutoModerationPlugin/AutoModerationPlugin.csproj" />
     <Project Path="Plugins/CarColorPlugin/CarColorPlugin.csproj" />
     <Project Path="Plugins/CollisionFlashPlugin/CollisionFlashPlugin.csproj" />
