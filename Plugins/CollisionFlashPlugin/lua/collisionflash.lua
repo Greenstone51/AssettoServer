@@ -7,6 +7,8 @@ local cfg = ac.configValues({
   durationSeconds = 0.35,
   opacity = 0.7,
   showInPits = false,
+  keepVisibleUnderSpeed = false,
+  speedLimitKph = 30,
 })
 
 -- Per-player settings, saved on the player's PC
@@ -15,6 +17,8 @@ local store = ac.storage({
   opacity = cfg.opacity,
   duration = cfg.durationSeconds,
   showInPits = cfg.showInPits,
+  keepVisibleUnderSpeed = cfg.keepVisibleUnderSpeed,
+  speedLimitKph = cfg.speedLimitKph,
 })
 
 local flashTimer = 0
@@ -78,6 +82,15 @@ function script.drawUI(dt)
   else
     show = flashTimer > 0
   end
+  
+  -- New: keep visible under speed limit (only applies outside pits)
+  if store.keepVisibleUnderSpeed and not inPits then
+    local speed = car.speedKmh or 0
+    if speed <= store.speedLimitKph then
+      show = true
+    end
+  end
+  
   if testTimer > 0 then show = true end
   if not show then return end
 
@@ -157,12 +170,22 @@ local function settingsWindow()
   end
 
   ui.separator()
+  ui.text('Speed limit')
+  if ui.checkbox('Keep visible under speed limit', store.keepVisibleUnderSpeed) then
+    store.keepVisibleUnderSpeed = not store.keepVisibleUnderSpeed
+  end
+  local s, sChanged = ui.slider('##cf_speedlimit', store.speedLimitKph, 0, 300, 'Speed limit: %.0f km/h')
+  if sChanged then store.speedLimitKph = s end
+
+  ui.separator()
   if ui.button('Test flash') then testTimer = 1.5 end
   ui.sameLine()
   if ui.button('Reset') then
     store.tlx, store.tly, store.brx, store.bry = 0, 0, 1, 1
     store.opacity, store.duration = cfg.opacity, cfg.durationSeconds
     store.showInPits = cfg.showInPits
+    store.keepVisibleUnderSpeed = cfg.keepVisibleUnderSpeed
+    store.speedLimitKph = cfg.speedLimitKph
   end
 
   ui.textWrapped('/ui hides every plugin UI, /ui collisionflash only this one.')

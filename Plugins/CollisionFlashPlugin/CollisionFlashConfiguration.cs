@@ -15,4 +15,10 @@ public class CollisionFlashConfiguration : IValidateConfiguration<CollisionFlash
 
     [YamlMember(Description = "Keep the red block permanently visible while the car is in the pits (instead of only flashing on collisions). Players can change this in their own in-game UI")]
     public bool ShowInPits { get; init; } = false;
+
+    [YamlMember(Description = "Keep the red block permanently visible when the car speed is below the speed limit. Players can change this in their own in-game UI")]
+    public bool KeepVisibleUnderSpeed { get; init; } = false;
+
+    [YamlMember(Description = "Speed limit in km/h below which the red block stays visible. Players can change this in their own in-game UI")]
+    public float SpeedLimitKph { get; init; } = 30f;
 }

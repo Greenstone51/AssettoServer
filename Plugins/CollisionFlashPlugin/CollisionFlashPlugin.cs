@@ -24,7 +24,9 @@ public class CollisionFlashPlugin : IHostedService
             ["durationSeconds"] = configuration.DurationSeconds.ToString(CultureInfo.InvariantCulture),
             ["opacity"] = configuration.Opacity.ToString(CultureInfo.InvariantCulture),
             // CSP only understands lowercase booleans; bool.ToString() would send "True"/"False"
-            ["showInPits"] = configuration.ShowInPits ? "true" : "false"
+            ["showInPits"] = configuration.ShowInPits ? "true" : "false",
+            ["keepVisibleUnderSpeed"] = configuration.KeepVisibleUnderSpeed ? "true" : "false",
+            ["speedLimitKph"] = configuration.SpeedLimitKph.ToString(CultureInfo.InvariantCulture)
         });
     }
 

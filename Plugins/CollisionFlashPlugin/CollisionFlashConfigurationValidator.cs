@@ -11,5 +11,7 @@ public class CollisionFlashConfigurationValidator : AbstractValidator<CollisionF
         RuleFor(cfg => cfg.DurationSeconds).InclusiveBetween(0.05f, 10f);
         RuleFor(cfg => cfg.Opacity).InclusiveBetween(0f, 1f);
         RuleFor(cfg => cfg.ShowInPits).NotNull();
+        RuleFor(cfg => cfg.KeepVisibleUnderSpeed).NotNull();
+        RuleFor(cfg => cfg.SpeedLimitKph).InclusiveBetween(0f, 400f);
     }
 }
