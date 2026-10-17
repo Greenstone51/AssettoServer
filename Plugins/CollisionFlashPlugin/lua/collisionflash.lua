@@ -7,6 +7,7 @@ local cfg = ac.configValues({
   keepVisibleUnderSpeed = false, speedLimitKph = 30,
   proximityEnabled = false, proximityDistance = 15,
   proximityPlayers = '', proximityReverse = false,
+  aiTrafficPrefix = 'AI-Traffic',
 })
 local store = ac.storage({
   tlx = 0.42, tly = 0.42, brx = 0.58, bry = 0.58,
@@ -15,6 +16,7 @@ local store = ac.storage({
   speedLimitKph = cfg.speedLimitKph,
   proximityEnabled = cfg.proximityEnabled, proximityDistance = cfg.proximityDistance,
   proximityPlayers = cfg.proximityPlayers, proximityReverse = cfg.proximityReverse,
+  aiTrafficPrefix = cfg.aiTrafficPrefix,
 })
 local flashTimer, testTimer = 0, 0
 local allOn, selfOn = true, true
@@ -55,6 +57,16 @@ local function allowedPlayer(name)
   return false
 end
 
+-- CSP/server AI flags are not always reliable for traffic cars, so also exclude
+-- names beginning with the configurable server-specific AI traffic prefix.
+local function isAiTrafficName(name)
+  local prefix = tostring(store.aiTrafficPrefix or ''):lower()
+  prefix = prefix:gsub('^%s+', ''):gsub('%s+$', '')
+  if prefix == '' then return false end
+  name = tostring(name or ''):lower()
+  return name:sub(1, #prefix) == prefix
+end
+
 -- Iterate actual cars and reject AI-controlled cars explicitly. Distance is squared to avoid sqrt.
 local function nearbyRealPlayer(myCar)
   if not store.proximityEnabled or myCar == nil or myCar.position == nil then return false end
@@ -65,7 +77,7 @@ local function nearbyRealPlayer(myCar)
     local other = ac.getCar(i)
     if other ~= nil and other.position ~= nil and other.isAIControlled ~= true then
       local name = other.driverName or other.name or ''
-      if allowedPlayer(name) then
+      if not isAiTrafficName(name) and allowedPlayer(name) then
         local dx = myCar.position.x - other.position.x
         local dy = myCar.position.y - other.position.y
         local dz = myCar.position.z - other.position.z
@@ -214,11 +226,11 @@ local function settingsWindow()
   if ui.checkbox('Enable proximity warning', store.proximityEnabled) then store.proximityEnabled = not store.proximityEnabled end
   local dist, distChanged = ui.slider('##cf_proximity_distance', store.proximityDistance, 1, 500, 'Distance: %.0f m')
   if distChanged then store.proximityDistance = dist end
-  -- Use the basic single-line editor signature (no explicit buffer-length argument),
-  -- which avoids a crash seen with some CSP Lua API versions.
   local names, namesChanged = ui.inputText('Player-name filter', tostring(store.proximityPlayers or ''))
   if namesChanged and type(names) == 'string' then store.proximityPlayers = names end
-  ui.textWrapped('Player filter: blank or * = everyone; otherwise enter exact driver names separated by commas. AI traffic is ignored.')
+  local prefix, prefixChanged = ui.inputText('AI traffic name prefix', tostring(store.aiTrafficPrefix or ''))
+  if prefixChanged and type(prefix) == 'string' then store.aiTrafficPrefix = prefix end
+  ui.textWrapped('Player filter: blank or * = everyone; otherwise enter exact driver names separated by commas. Cars with the AI traffic prefix above are always ignored; blank prefix disables this extra name-based check.')
   if ui.checkbox('Reverse: show continuously when NO matching player is nearby', store.proximityReverse) then
     store.proximityReverse = not store.proximityReverse
     proximityActive = false
@@ -231,6 +243,7 @@ local function settingsWindow()
     store.opacity, store.duration = cfg.opacity, cfg.durationSeconds
     store.showInPits, store.keepVisibleUnderSpeed, store.speedLimitKph = cfg.showInPits, cfg.keepVisibleUnderSpeed, cfg.speedLimitKph
     store.proximityEnabled, store.proximityDistance, store.proximityPlayers, store.proximityReverse = cfg.proximityEnabled, cfg.proximityDistance, cfg.proximityPlayers, cfg.proximityReverse
+    store.aiTrafficPrefix = cfg.aiTrafficPrefix
     proximityActive, proximityReverseShow = false, false
   end
   ui.textWrapped('/ui hides every plugin UI, /ui collisionflash only this one.')
