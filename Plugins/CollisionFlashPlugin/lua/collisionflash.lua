@@ -230,7 +230,13 @@ local function settingsWindow()
   local s, sc = ui.slider('##cf_speedlimit', store.speedLimitKph, 0, 300, 'Speed limit: %.0f km/h')
   if sc then store.speedLimitKph = s end
   ui.separator(); ui.text('Real-player proximity warning')
-  if ui.checkbox('Enable proximity warning', store.proximityEnabled) then store.proximityEnabled = not store.proximityEnabled end
+  if ui.checkbox('Enable proximity warning', store.proximityEnabled) then
+    store.proximityEnabled = not store.proximityEnabled
+    -- Re-evaluate proximity immediately after re-enabling, even if a player
+    -- was already in range before the toggle changed.
+    proximityActive = false
+    proximityReverseShow = false
+  end
   local dist, distChanged = ui.slider('##cf_proximity_distance', store.proximityDistance, 1, 500, 'Distance: %.0f m')
   if distChanged then store.proximityDistance = dist end
   local names, namesChanged = ui.inputText('Player-name filter', tostring(store.proximityPlayers or ''))
