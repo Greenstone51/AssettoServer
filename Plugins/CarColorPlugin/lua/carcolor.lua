@@ -151,7 +151,10 @@ local function applyToCar(index, st)
         root:resetSkin()
 
         if st.body then
+            -- Car models can share material resources across instances. Fork the selected
+            -- materials before editing so this player's color cannot leak to other cars.
             local bodyMeshes = root:findMeshes(bodyFilter)
+            bodyMeshes:ensureUniqueMaterials()
             bodyMeshes:setMaterialTexture('txDiffuse', st.body)
 
             if st.metallic and st.roughness then
@@ -165,12 +168,15 @@ local function applyToCar(index, st)
         end
 
         if st.caliper then
-            root:findMeshes(caliperFilter):setMaterialTexture('txDiffuse', st.caliper)
+            local caliperMeshes = root:findMeshes(caliperFilter)
+            caliperMeshes:ensureUniqueMaterials()
+            caliperMeshes:setMaterialTexture('txDiffuse', st.caliper)
         end
 
         ac.refreshCarColor(index)
     end)
     if not ok then ac.log('CarColor: failed to apply colors to car ' .. tostring(index)) end
+    return ok
 end
 
 local function ownRenderState()
@@ -191,7 +197,7 @@ local function ownRenderState()
 end
 
 local function applyOwn()
-    applyToCar(0, ownRenderState())
+    return applyToCar(0, ownRenderState())
 end
 
 -- ---------- draft (what the picker is currently editing) ----------
@@ -343,6 +349,8 @@ end)
 
 local pendingSendAt = nil
 local lastSentAt = -1000
+local startupSyncRetriesRemaining = 0
+local startupSyncRetryAt = nil
 
 local function queueSend(delay)
     pendingSendAt = os.clock() + (delay or 0)
@@ -378,7 +386,21 @@ function script.update(dt)
             pendingSendAt = nil
             lastSentAt = now
             sendState()
+
+            -- The client script can start just before the online-event channel is ready.
+            -- Retry the saved state a couple of times, spaced beyond the server cooldown.
+            if startupSyncRetriesRemaining > 0 then
+                startupSyncRetriesRemaining = startupSyncRetriesRemaining - 1
+                startupSyncRetryAt = now + cooldown + 0.5
+            else
+                startupSyncRetryAt = nil
+            end
         end
+    end
+
+    if startupSyncRetryAt ~= nil and os.clock() >= startupSyncRetryAt and pendingSendAt == nil then
+        startupSyncRetryAt = nil
+        queueSend(0)
     end
 end
 
@@ -832,11 +854,21 @@ end
 
 ui.registerOnlineExtra(ui.Icons.SettingsAlt, 'Car Color', function() return true end, window, nil, ui.OnlineExtraFlags.Tool)
 
--- Apply the saved look to our own car after load and tell the server about it.
-setTimeout(function()
+-- Restore the saved look only once the local car scene is ready. Early script startup can
+-- precede carRoot creation, so retry the local application briefly instead of silently
+-- leaving the car with its stock appearance.
+local function restoreSavedAppearance(attempt)
     local st = ownRenderState()
-    if st.body or st.caliper then
-        applyOwn()
+    if not st.body and not st.caliper then return end
+
+    if applyOwn() then
+        -- Send the persisted state to the server. A bounded retry handles the event channel
+        -- not being ready on the first attempt; retries are spaced beyond the server cooldown.
+        startupSyncRetriesRemaining = 2
         queueSend(0)
+    elseif attempt < 10 then
+        setTimeout(function() restoreSavedAppearance(attempt + 1) end, 0.5)
     end
-end, 2)
+end
+
+setTimeout(function() restoreSavedAppearance(1) end, 2)
