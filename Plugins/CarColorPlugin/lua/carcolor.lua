@@ -699,14 +699,14 @@ local function drawRgbRow()
     local c = hexToRgbm(hex)
     local avail = ui.availableSpaceX()
     local boxW = (avail - 32 - 12) / 3
-    local disabled = ui.ButtonFlags.Disabled
-    ui.button('R: ' .. to255(c.r) .. '##cc_r', vec2(boxW, 26), disabled)
-    ui.sameLine(0, 4)
-    ui.button('G: ' .. to255(c.g) .. '##cc_g', vec2(boxW, 26), disabled)
-    ui.sameLine(0, 4)
-    ui.button('B: ' .. to255(c.b) .. '##cc_b', vec2(boxW, 26), disabled)
-    ui.sameLine(0, 4)
-    swatch('rgb_sw', hex, 28, 26)
+
+    -- Editable numeric RGB controls (0-255), kept in sync with the HEX input and picker.
+    local r, rChanged = ui.slider('##cc_r', to255(c.r), 0, 255, 'R: %.0f')
+    local g, gChanged = ui.slider('##cc_g', to255(c.g), 0, 255, 'G: %.0f')
+    local b, bChanged = ui.slider('##cc_b', to255(c.b), 0, 255, 'B: %.0f')
+    if rChanged or gChanged or bChanged then
+        setDraftColor(string.format('%02X%02X%02X', r, g, b), 'rgb')
+    end
 end
 
 local function drawHexRow()
