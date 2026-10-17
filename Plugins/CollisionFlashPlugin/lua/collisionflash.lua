@@ -21,6 +21,7 @@ local store = ac.storage({
 local flashTimer, testTimer = 0, 0
 local allOn, selfOn = true, true
 local proximityActive = false
+local proximityShow = false
 local proximityReverseShow = false
 local resizeEdge = nil
 local resizeStart = nil
@@ -105,6 +106,7 @@ local function refreshProximityState(forceEntryCheck)
     trigger('player proximity')
   end
   proximityActive = nearby
+  proximityShow = store.proximityEnabled and not store.proximityReverse and nearby
   proximityReverseShow = store.proximityEnabled and store.proximityReverse and car ~= nil and not nearby
 end
 
@@ -189,7 +191,7 @@ function script.drawUI(dt)
   local inPits = isInPits(car)
   local show = inPits and store.showInPits or (not inPits and flashTimer > 0)
   if store.keepVisibleUnderSpeed and not inPits and car ~= nil and (car.speedKmh or 0) <= store.speedLimitKph then show = true end
-  if testTimer > 0 or proximityReverseShow then show = true end
+  if testTimer > 0 or proximityShow or proximityReverseShow then show = true end
   if not show then return end
   local screenSize = ac.getUI().windowSize
   ui.transparentWindow('collisionFlash', vec2(0, 0), screenSize, function()
@@ -241,6 +243,7 @@ local function settingsWindow()
   if ui.checkbox('Enable proximity warning', store.proximityEnabled) then
     store.proximityEnabled = not store.proximityEnabled
     proximityActive = false
+    proximityShow = false
     proximityReverseShow = false
     if store.proximityEnabled then
       refreshProximityState(true)
@@ -264,6 +267,7 @@ local function settingsWindow()
   if ui.checkbox('Reverse: show continuously when NO matching player is nearby', store.proximityReverse) then
     store.proximityReverse = not store.proximityReverse
     proximityActive = false
+    refreshProximityState(true)
   end
   ui.textWrapped('Reverse off: flash when a matching player enters the radius. Reverse on: stay visible while no matching real player is within range.')
   if ui.button('Test flash') then testTimer = 1.5 end
@@ -274,7 +278,7 @@ local function settingsWindow()
     store.showInPits, store.keepVisibleUnderSpeed, store.speedLimitKph = cfg.showInPits, cfg.keepVisibleUnderSpeed, cfg.speedLimitKph
     store.proximityEnabled, store.proximityDistance, store.proximityPlayers, store.proximityReverse = cfg.proximityEnabled, cfg.proximityDistance, cfg.proximityPlayers, cfg.proximityReverse
     store.aiTrafficPrefix = cfg.aiTrafficPrefix
-    proximityActive, proximityReverseShow = false, false
+    proximityActive, proximityShow, proximityReverseShow = false, false, false
   end
   ui.textWrapped('/ui hides every plugin UI, /ui collisionflash only this one.')
   if pushed > 0 then ui.popStyleColor(pushed) end
