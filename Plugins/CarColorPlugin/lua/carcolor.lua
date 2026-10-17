@@ -154,6 +154,7 @@ local finishSupported = true
 local function applyToCar(index, st)
     local ok = pcall(function()
         local root = ac.findNodes('carRoot:' .. index)
+        if root == nil then error('carRoot is not ready') end
         root:resetSkin()
 
         if st.body then
@@ -360,6 +361,8 @@ local pendingSendAt = nil
 local lastSentAt = -1000
 local startupSyncRetriesRemaining = 0
 local startupSyncRetryAt = nil
+local restoreRetriesRemaining = 0
+local restoreRetryAt = nil
 
 local function queueSend(delay)
     pendingSendAt = os.clock() + (delay or 0)
@@ -380,6 +383,15 @@ end
 -- Throttled so the server-side cooldown does not drop changes.
 -- Also throttles the live local preview while dragging the wheel.
 function script.update(dt)
+    -- Assetto Corsa can rebuild/reset the local car scene after the Lua script starts.
+    -- Re-apply the saved state through the initial scene-load window, independently of
+    -- network synchronization, so a late skin/material load does not discard the color.
+    if restoreRetriesRemaining > 0 and restoreRetryAt ~= nil and os.clock() >= restoreRetryAt then
+        restoreRetryAt = os.clock() + 1.0
+        restoreRetriesRemaining = restoreRetriesRemaining - 1
+        applyOwn()
+    end
+
     if previewDirty then
         local now = os.clock()
         if now - lastPreviewAt >= 0.1 then
@@ -871,12 +883,18 @@ local function restoreSavedAppearance(attempt)
     if not st.body and not st.caliper then return end
 
     if applyOwn() then
+        -- Keep reapplying for a short period because CSP/AC may rebuild car materials
+        -- after the first successful call. This is local rendering, not a server retry.
+        restoreRetriesRemaining = 30
+        restoreRetryAt = os.clock() + 1.0
         -- Send the persisted state to the server. A bounded retry handles the event channel
         -- not being ready on the first attempt; retries are spaced beyond the server cooldown.
         startupSyncRetriesRemaining = 2
         queueSend(0)
-    elseif attempt < 10 then
+    elseif attempt < 40 then
         setTimeout(function() restoreSavedAppearance(attempt + 1) end, 0.5)
+    else
+        ac.log('CarColor: saved appearance could not be applied after scene-load retries')
     end
 end
 
