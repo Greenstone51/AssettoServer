@@ -103,6 +103,8 @@ local history = parseHexList(store.history)
 local favourites = parseHexList(store.favourites)
 
 local function saveLists()
+    -- ac.storage writes are debounced by CSP. Keep the serialized values in storage
+    -- whenever a list changes, and log the counts so persistence issues are diagnosable.
     store.history = table.concat(history, ',')
     store.favourites = table.concat(favourites, ',')
 end
@@ -123,6 +125,8 @@ local function pushHistory(hex)
 end
 
 local function addFavourite(hex)
+    hex = normHex(hex)
+    if not hex then return end
     if indexOf(favourites, hex) then return end
     if #favourites >= maxFavourites then
         ui.toast(ui.Icons.Ban, 'Favourites list is full (max ' .. maxFavourites .. ')')
@@ -133,6 +137,8 @@ local function addFavourite(hex)
 end
 
 local function removeFavourite(hex)
+    hex = normHex(hex)
+    if not hex then return end
     local i = indexOf(favourites, hex)
     if i then
         table.remove(favourites, i)
@@ -278,7 +284,10 @@ end
 
 local function applyDraft()
     store.body = draft.body
-    if draft.body ~= '' then pushHistory(draft.body) end
+    -- Recents should track the color currently being applied, regardless of whether
+    -- the user is editing body paint or calipers.
+    local appliedHex = target == 'body' and draft.body or (draft.useCaliper and draft.caliper or '')
+    if appliedHex ~= '' then pushHistory(appliedHex) end
     store.caliper = draft.caliper
     store.useCaliper = draft.useCaliper
     store.finishSet = draft.finishSet and draft.body ~= ''
