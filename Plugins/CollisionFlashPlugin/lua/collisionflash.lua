@@ -95,15 +95,23 @@ local function nearbyRealPlayer(myCar)
   return false
 end
 
+local function refreshProximityState(forceEntryCheck)
+  local car = ac.getCar(0)
+  local nearby = nearbyRealPlayer(car)
+
+  -- When the setting is enabled (or its filters change), evaluate the current
+  -- situation immediately. Do not wait for a future enter-radius transition.
+  if nearby and (forceEntryCheck or not proximityActive) and not store.proximityReverse then
+    trigger('player proximity')
+  end
+  proximityActive = nearby
+  proximityReverseShow = store.proximityEnabled and store.proximityReverse and car ~= nil and not nearby
+end
+
 function script.update(dt)
   local car = ac.getCar(0)
   if car ~= nil and (car.collisionDepth or 0) > 0 then trigger('collisionDepth') end
-  local nearby = nearbyRealPlayer(car)
-  if nearby and not proximityActive and not store.proximityReverse then trigger('player proximity') end
-  proximityActive = nearby
-  -- Reverse mode is a continuous state: keep the indicator visible whenever no
-  -- eligible real player is inside the configured radius (not a one-shot flash).
-  proximityReverseShow = store.proximityEnabled and store.proximityReverse and car ~= nil and not nearby
+  refreshProximityState(false)
   flashTimer = math.max(0, flashTimer - dt)
   testTimer = math.max(0, testTimer - dt)
 end
@@ -232,17 +240,26 @@ local function settingsWindow()
   ui.separator(); ui.text('Real-player proximity warning')
   if ui.checkbox('Enable proximity warning', store.proximityEnabled) then
     store.proximityEnabled = not store.proximityEnabled
-    -- Re-evaluate proximity immediately after re-enabling, even if a player
-    -- was already in range before the toggle changed.
     proximityActive = false
     proximityReverseShow = false
+    if store.proximityEnabled then
+      refreshProximityState(true)
+    end
   end
   local dist, distChanged = ui.slider('##cf_proximity_distance', store.proximityDistance, 1, 500, 'Distance: %.0f m')
   if distChanged then store.proximityDistance = dist end
   local names, namesChanged = ui.inputText('Player-name filter', tostring(store.proximityPlayers or ''))
-  if namesChanged and type(names) == 'string' then store.proximityPlayers = names end
+  if namesChanged and type(names) == 'string' then
+    store.proximityPlayers = names
+    proximityActive = false
+    refreshProximityState(true)
+  end
   local prefix, prefixChanged = ui.inputText('AI traffic name prefix', tostring(store.aiTrafficPrefix or ''))
-  if prefixChanged and type(prefix) == 'string' then store.aiTrafficPrefix = prefix end
+  if prefixChanged and type(prefix) == 'string' then
+    store.aiTrafficPrefix = prefix
+    proximityActive = false
+    refreshProximityState(true)
+  end
   ui.textWrapped('Player filter: blank or * = everyone; otherwise enter exact driver names separated by commas. Cars with the AI traffic prefix above are always ignored; blank prefix disables this extra name-based check.')
   if ui.checkbox('Reverse: show continuously when NO matching player is nearby', store.proximityReverse) then
     store.proximityReverse = not store.proximityReverse
