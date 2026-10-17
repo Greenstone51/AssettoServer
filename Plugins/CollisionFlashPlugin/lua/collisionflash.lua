@@ -21,6 +21,7 @@ local allOn, selfOn = true, true
 local proximityActive = false
 local proximityReverseShow = false
 local resizeEdge = nil
+local resizeStart = nil
 local resizeWasDown = false
 local MIN_BOX = 0.02
 
@@ -94,31 +95,63 @@ local function drawIndicator(screenSize)
   local p2 = vec2(screenSize.x * store.brx, screenSize.y * store.bry)
   ui.drawRectFilled(p1, p2, rgbm(1, 0, 0, store.opacity))
 
-  -- Drag any edge of the rectangle to resize. Edges are screen-relative and remain draggable
-  -- even while the indicator is flashing; hold the left mouse button on an edge.
+  -- Drag inside to move. Drag any edge to resize that axis; drag a corner to
+  -- resize horizontally and vertically at the same time.
   local mouse = ui.mousePos()
   local down = ui.mouseDown(ui.MouseButton.Left)
   local scale = math.max(8, math.min(screenSize.x, screenSize.y) * 0.012)
+  local inside = mouse.x >= p1.x and mouse.x <= p2.x and mouse.y >= p1.y and mouse.y <= p2.y
+
   if down and not resizeWasDown then
-    local left = math.abs(mouse.x - p1.x) <= scale and mouse.y >= p1.y - scale and mouse.y <= p2.y + scale
-    local right = math.abs(mouse.x - p2.x) <= scale and mouse.y >= p1.y - scale and mouse.y <= p2.y + scale
-    local top = math.abs(mouse.y - p1.y) <= scale and mouse.x >= p1.x - scale and mouse.x <= p2.x + scale
-    local bottom = math.abs(mouse.y - p2.y) <= scale and mouse.x >= p1.x - scale and mouse.x <= p2.x + scale
-    if left then resizeEdge = 'left'
-    elseif right then resizeEdge = 'right'
-    elseif top then resizeEdge = 'top'
-    elseif bottom then resizeEdge = 'bottom' end
+    local nearLeft = math.abs(mouse.x - p1.x) <= scale
+    local nearRight = math.abs(mouse.x - p2.x) <= scale
+    local nearTop = math.abs(mouse.y - p1.y) <= scale
+    local nearBottom = math.abs(mouse.y - p2.y) <= scale
+
+    if (nearLeft or nearRight) and (nearTop or nearBottom) then
+      resizeEdge = (nearLeft and 'left' or 'right') .. '_' .. (nearTop and 'top' or 'bottom')
+    elseif nearLeft and mouse.y >= p1.y - scale and mouse.y <= p2.y + scale then
+      resizeEdge = 'left'
+    elseif nearRight and mouse.y >= p1.y - scale and mouse.y <= p2.y + scale then
+      resizeEdge = 'right'
+    elseif nearTop and mouse.x >= p1.x - scale and mouse.x <= p2.x + scale then
+      resizeEdge = 'top'
+    elseif nearBottom and mouse.x >= p1.x - scale and mouse.x <= p2.x + scale then
+      resizeEdge = 'bottom'
+    elseif inside then
+      resizeEdge = 'move'
+    end
+
+    if resizeEdge ~= nil then
+      resizeStart = {
+        mouseX = mouse.x, mouseY = mouse.y,
+        tlx = store.tlx, tly = store.tly, brx = store.brx, bry = store.bry,
+      }
+    end
   elseif not down then
-    resizeEdge = nil
+    resizeEdge, resizeStart = nil, nil
   end
-  if down and resizeEdge ~= nil then
-    local x, y = clamp(mouse.x / screenSize.x, 0, 1), clamp(mouse.y / screenSize.y, 0, 1)
-    if resizeEdge == 'left' then store.tlx = math.min(x, store.brx - MIN_BOX)
-    elseif resizeEdge == 'right' then store.brx = math.max(x, store.tlx + MIN_BOX)
-    elseif resizeEdge == 'top' then store.tly = math.min(y, store.bry - MIN_BOX)
-    elseif resizeEdge == 'bottom' then store.bry = math.max(y, store.tly + MIN_BOX) end
-    store.tlx, store.tly = clamp(store.tlx, 0, 1 - MIN_BOX), clamp(store.tly, 0, 1 - MIN_BOX)
-    store.brx, store.bry = clamp(store.brx, store.tlx + MIN_BOX, 1), clamp(store.bry, store.tly + MIN_BOX, 1)
+
+  if down and resizeEdge ~= nil and resizeStart ~= nil then
+    local dx = (mouse.x - resizeStart.mouseX) / screenSize.x
+    local dy = (mouse.y - resizeStart.mouseY) / screenSize.y
+    if resizeEdge == 'move' then
+      local width, height = resizeStart.brx - resizeStart.tlx, resizeStart.bry - resizeStart.tly
+      store.tlx = clamp(resizeStart.tlx + dx, 0, 1 - width)
+      store.tly = clamp(resizeStart.tly + dy, 0, 1 - height)
+      store.brx, store.bry = store.tlx + width, store.tly + height
+    else
+      if resizeEdge == 'left' or resizeEdge:find('left', 1, true) then
+        store.tlx = clamp(resizeStart.tlx + dx, 0, resizeStart.brx - MIN_BOX)
+      elseif resizeEdge == 'right' or resizeEdge:find('right', 1, true) then
+        store.brx = clamp(resizeStart.brx + dx, resizeStart.tlx + MIN_BOX, 1)
+      end
+      if resizeEdge == 'top' or resizeEdge:find('top', 1, true) then
+        store.tly = clamp(resizeStart.tly + dy, 0, resizeStart.bry - MIN_BOX)
+      elseif resizeEdge == 'bottom' or resizeEdge:find('bottom', 1, true) then
+        store.bry = clamp(resizeStart.bry + dy, resizeStart.tly + MIN_BOX, 1)
+      end
+    end
   end
   resizeWasDown = down
 end
@@ -181,8 +214,10 @@ local function settingsWindow()
   if ui.checkbox('Enable proximity warning', store.proximityEnabled) then store.proximityEnabled = not store.proximityEnabled end
   local dist, distChanged = ui.slider('##cf_proximity_distance', store.proximityDistance, 1, 500, 'Distance: %.0f m')
   if distChanged then store.proximityDistance = dist end
-  local names, namesChanged = ui.inputText('##cf_proximity_players', tostring(store.proximityPlayers or ''), 256)
-  if namesChanged then store.proximityPlayers = names end
+  -- Use the basic single-line editor signature (no explicit buffer-length argument),
+  -- which avoids a crash seen with some CSP Lua API versions.
+  local names, namesChanged = ui.inputText('Player-name filter', tostring(store.proximityPlayers or ''))
+  if namesChanged and type(names) == 'string' then store.proximityPlayers = names end
   ui.textWrapped('Player filter: blank or * = everyone; otherwise enter exact driver names separated by commas. AI traffic is ignored.')
   if ui.checkbox('Reverse: show continuously when NO matching player is nearby', store.proximityReverse) then
     store.proximityReverse = not store.proximityReverse
