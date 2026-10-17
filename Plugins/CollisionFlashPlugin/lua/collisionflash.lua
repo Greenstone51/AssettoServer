@@ -57,14 +57,21 @@ local function allowedPlayer(name)
   return false
 end
 
--- CSP/server AI flags are not always reliable for traffic cars, so also exclude
--- names beginning with the configurable server-specific AI traffic prefix.
+-- Check each available name independently: driverName can be populated with a
+-- generic label while name contains the server's AI-Traffic-prefixed car name.
 local function isAiTrafficName(name)
   local prefix = tostring(store.aiTrafficPrefix or ''):lower()
   prefix = prefix:gsub('^%s+', ''):gsub('%s+$', '')
   if prefix == '' then return false end
-  name = tostring(name or ''):lower()
+  name = tostring(name or ''):lower():gsub('^%s+', '')
   return name:sub(1, #prefix) == prefix
+end
+
+local function isAiTrafficCar(car)
+  if car == nil then return false end
+  return isAiTrafficName(car.driverName)
+      or isAiTrafficName(car.name)
+      or isAiTrafficName(car.carName)
 end
 
 -- Iterate actual cars and reject AI-controlled cars explicitly. Distance is squared to avoid sqrt.
@@ -75,9 +82,9 @@ local function nearbyRealPlayer(myCar)
   local count = sim and sim.carsCount or 0
   for i = 1, count - 1 do
     local other = ac.getCar(i)
-    if other ~= nil and other.position ~= nil and other.isAIControlled ~= true then
-      local name = other.driverName or other.name or ''
-      if not isAiTrafficName(name) and allowedPlayer(name) then
+    if other ~= nil and other.position ~= nil and other.isAIControlled ~= true and not isAiTrafficCar(other) then
+      local name = other.driverName or other.name or other.carName or ''
+      if allowedPlayer(name) then
         local dx = myCar.position.x - other.position.x
         local dy = myCar.position.y - other.position.y
         local dz = myCar.position.z - other.position.z
